@@ -8,7 +8,7 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     volumes:
       # Mount cache folder for persistence
       - cache-data:/app/apps/api/cache
@@ -34,9 +34,9 @@ services:
       - VIDEO_WORKER_POLL_INTERVAL_MS=${VIDEO_WORKER_POLL_INTERVAL_MS:-1000}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
       # Initial Authentication configuration
-      - OPENINARY_ADMIN_NAME=${OPENINARY_ADMIN_NAME}
-      - OPENINARY_ADMIN_EMAIL=${OPENINARY_ADMIN_EMAIL}
-      - OPENINARY_ADMIN_PASSWORD=${OPENINARY_ADMIN_PASSWORD}
+      - OPENINARY_ADMIN_NAME=${OPENINARY_ADMIN_NAME:-}
+      - OPENINARY_ADMIN_EMAIL=${OPENINARY_ADMIN_EMAIL:-}
+      - OPENINARY_ADMIN_PASSWORD=${OPENINARY_ADMIN_PASSWORD:-}
       - OPENINARY_GENERATE_API_KEY=${OPENINARY_GENERATE_API_KEY:-true}
     networks:
       - openinary-network
@@ -52,22 +52,22 @@ services:
           cpus: '${DOCKER_CPU_RESERVATION:-0.5}'
           memory: ${DOCKER_MEMORY_RESERVATION:-1G}
 
-  # Full Stack (API + Web + Nginx) - Profile: full
+  # Full Stack (API + Web + Nginx)
   openinary:
-    profiles: ["full"]
-    # Use pre-built image by default, or build locally with: docker compose --profile full build
+    # Use pre-built image by default, or build locally with: docker compose build
     image: openinary/openinary:${IMAGE_TAG:-latest}
     build:
       context: .
-      dockerfile: docker/full.Dockerfile
+      dockerfile: Dockerfile
       args:
         # NEXT_PUBLIC_API_BASE_URL is needed at build time
         # CORS is handled at runtime in Next.js middleware
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api}
         # IMAGE_TAG is baked into the image at build time (written to /app/version.txt)
         IMAGE_TAG: ${IMAGE_TAG:-latest}
+    restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     volumes:
       # Mount cache folder for persistence
       - cache-data:/app/apps/api/cache
@@ -97,9 +97,9 @@ services:
       - VIDEO_WORKER_POLL_INTERVAL_MS=${VIDEO_WORKER_POLL_INTERVAL_MS:-1000}
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
       # Initial Authentication configuration
-      - OPENINARY_ADMIN_NAME=${OPENINARY_ADMIN_NAME}
-      - OPENINARY_ADMIN_EMAIL=${OPENINARY_ADMIN_EMAIL}
-      - OPENINARY_ADMIN_PASSWORD=${OPENINARY_ADMIN_PASSWORD}
+      - OPENINARY_ADMIN_NAME=${OPENINARY_ADMIN_NAME:-}
+      - OPENINARY_ADMIN_EMAIL=${OPENINARY_ADMIN_EMAIL:-}
+      - OPENINARY_ADMIN_PASSWORD=${OPENINARY_ADMIN_PASSWORD:-}
       - OPENINARY_GENERATE_API_KEY=${OPENINARY_GENERATE_API_KEY:-false}
     networks:
       - openinary-network

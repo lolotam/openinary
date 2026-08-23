@@ -150,6 +150,22 @@ export function initializeDatabase(db: Database.Database) {
     `);
   }
 
+  // Two Factor table
+  if (!tableExists(db, "twoFactor")) {
+    db.exec(`
+      CREATE TABLE twoFactor (
+        id TEXT PRIMARY KEY,
+        secret TEXT NOT NULL,
+        backupCodes TEXT NOT NULL,
+        userId TEXT NOT NULL UNIQUE,
+        verified INTEGER NOT NULL DEFAULT 1,
+        failedVerificationCount INTEGER DEFAULT 0,
+        lockedUntil INTEGER,
+        FOREIGN KEY (userId) REFERENCES user(id) ON DELETE CASCADE
+      );
+    `);
+  }
+
   // Video Jobs table for queue management
   if (!tableExists(db, "video_jobs")) {
     db.exec(`

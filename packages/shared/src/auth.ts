@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { apiKey } from "@better-auth/api-key";
+import { twoFactor } from "better-auth/plugins";
 import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -97,69 +98,7 @@ function initializeTables() {
     }
   };
 
-  const requiredTables = ["user", "session", "account", "verification", "apiKey", "video_jobs"];
-  const missingTables = requiredTables.filter((table) => !tableExists(table));
-
-  if (missingTables.length === 0) {
-    // check if the apiKey has the correct schema
-    const hasReferenceId = db.prepare("SELECT COUNT(*) as count FROM pragma_table_info('apiKey') WHERE name='referenceId'").get() as { count: number };
-    
-    // Migration: add referenceId column if missing (required by @better-auth/api-key v1.5.x)
-    // Creates a apiKey_new table with the correct schema
-    // Copies data from the current apiKey table into the apiKey_new table
-    // Drops the apiKey table
-    // Renames apiKey_new -> apiKey 
-    if (!hasReferenceId.count) {
-      db.transaction(() => {
-        db.exec(`
-          CREATE TABLE apiKey_new (
-            id TEXT PRIMARY KEY,
-            name TEXT,
-            start TEXT,
-            prefix TEXT,
-            key TEXT NOT NULL,
-            referenceId TEXT NOT NULL,
-            configId TEXT NOT NULL DEFAULT 'default',
-            refillInterval INTEGER,
-            refillAmount INTEGER,
-            lastRefillAt INTEGER,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            rateLimitEnabled INTEGER NOT NULL DEFAULT 1,
-            rateLimitTimeWindow INTEGER,
-            rateLimitMax INTEGER,
-            requestCount INTEGER NOT NULL DEFAULT 0,
-            remaining INTEGER,
-            lastRequest INTEGER,
-            expiresAt INTEGER,
-            createdAt INTEGER NOT NULL,
-            updatedAt INTEGER NOT NULL,
-            permissions TEXT,
-            metadata TEXT,
-            FOREIGN KEY (referenceId) REFERENCES user(id) ON DELETE CASCADE
-          );
-
-          INSERT INTO apiKey_new SELECT 
-            id, name, start, prefix, key,
-            userId as referenceId,
-            'default' as configId,
-            refillInterval, refillAmount, lastRefillAt,
-            enabled, rateLimitEnabled, rateLimitTimeWindow, rateLimitMax,
-            requestCount, remaining, lastRequest, expiresAt,
-            createdAt, updatedAt, permissions, metadata
-          FROM apiKey;
-
-          DROP TABLE apiKey;
-
-          ALTER TABLE apiKey_new RENAME TO apiKey;
-        `);
-      })();
-    }
-
-    return; // Tables already exist
-  }
-
-  console.log(`Initializing database tables: ${missingTables.join(", ")}...`);
-
+  // Step 1: Create any missing tables
   // User table
   if (!tableExists("user")) {
     db.exec(`
@@ -177,8 +116,6 @@ function initializeTables() {
   }
 
   // SECURITY: Enforce a hard limit of a single user/admin at the database level.
-  // This closes any race-condition window where two sign-ups could occur concurrently.
-  // We implement this via a BEFORE INSERT trigger that aborts when at least one row exists.
   try {
     const triggerExists = db
       .prepare(
@@ -285,6 +222,22 @@ function initializeTables() {
     `);
   }
 
+  // Two Factor table (Better Auth 1.6.26 schema)
+  if (!tableExists("twoFactor")) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS twoFactor (
+        id TEXT PRIMARY KEY,
+        secret TEXT NOT NULL,
+        backupCodes TEXT NOT NULL,
+        userId TEXT NOT NULL UNIQUE,
+        verified INTEGER NOT NULL DEFAULT 1,
+        failedVerificationCount INTEGER DEFAULT 0,
+        lockedUntil INTEGER,
+        FOREIGN KEY (userId) REFERENCES user(id) ON DELETE CASCADE
+      );
+    `);
+  }
+
   // Video Jobs table for queue management
   if (!tableExists("video_jobs")) {
     db.exec(`
@@ -309,7 +262,78 @@ function initializeTables() {
     `);
   }
 
-  console.log("Database tables initialized!\n");
+  // Step 2: Run unconditional column-level migrations for existing databases
+  db.transaction(() => {
+    // Migration for apiKey table (referenceId)
+    const hasReferenceId = db.prepare("SELECT COUNT(*) as count FROM pragma_table_info('apiKey') WHERE name='referenceId'").get() as { count: number };
+    if (!hasReferenceId.count) {
+      db.exec(`
+        CREATE TABLE apiKey_new (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          start TEXT,
+          prefix TEXT,
+          key TEXT NOT NULL,
+          referenceId TEXT NOT NULL,
+          configId TEXT NOT NULL DEFAULT 'default',
+          refillInterval INTEGER,
+          refillAmount INTEGER,
+          lastRefillAt INTEGER,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          rateLimitEnabled INTEGER NOT NULL DEFAULT 1,
+          rateLimitTimeWindow INTEGER,
+          rateLimitMax INTEGER,
+          requestCount INTEGER NOT NULL DEFAULT 0,
+          remaining INTEGER,
+          lastRequest INTEGER,
+          expiresAt INTEGER,
+          createdAt INTEGER NOT NULL,
+          updatedAt INTEGER NOT NULL,
+          permissions TEXT,
+          metadata TEXT,
+          FOREIGN KEY (referenceId) REFERENCES user(id) ON DELETE CASCADE
+        );
+
+        INSERT INTO apiKey_new SELECT 
+          id, name, start, prefix, key,
+          userId as referenceId,
+          'default' as configId,
+          refillInterval, refillAmount, lastRefillAt,
+          enabled, rateLimitEnabled, rateLimitTimeWindow, rateLimitMax,
+          requestCount, remaining, lastRequest, expiresAt,
+          createdAt, updatedAt, permissions, metadata
+        FROM apiKey;
+
+        DROP TABLE apiKey;
+
+        ALTER TABLE apiKey_new RENAME TO apiKey;
+      `);
+    }
+
+    // Migration for user table (twoFactorEnabled)
+    const hasTwoFactorEnabled = db.prepare("SELECT COUNT(*) as count FROM pragma_table_info('user') WHERE name='twoFactorEnabled'").get() as { count: number };
+    if (!hasTwoFactorEnabled.count) {
+      db.exec("ALTER TABLE user ADD COLUMN twoFactorEnabled INTEGER DEFAULT 0;");
+    }
+
+    // Migrations for twoFactor table (verified, failedVerificationCount, lockedUntil)
+    const hasFailedVerificationCount = db.prepare("SELECT COUNT(*) as count FROM pragma_table_info('twoFactor') WHERE name='failedVerificationCount'").get() as { count: number };
+    if (!hasFailedVerificationCount.count) {
+      db.exec("ALTER TABLE twoFactor ADD COLUMN failedVerificationCount INTEGER DEFAULT 0;");
+    }
+
+    const hasLockedUntil = db.prepare("SELECT COUNT(*) as count FROM pragma_table_info('twoFactor') WHERE name='lockedUntil'").get() as { count: number };
+    if (!hasLockedUntil.count) {
+      db.exec("ALTER TABLE twoFactor ADD COLUMN lockedUntil INTEGER;");
+    }
+
+    const hasVerified = db.prepare("SELECT COUNT(*) as count FROM pragma_table_info('twoFactor') WHERE name='verified'").get() as { count: number };
+    if (!hasVerified.count) {
+      db.exec("ALTER TABLE twoFactor ADD COLUMN verified INTEGER NOT NULL DEFAULT 1;");
+    }
+  })();
+
+  console.log("Database tables and schema initialized!\n");
 }
 
 // Initialize tables before creating Better Auth instance
@@ -369,6 +393,7 @@ if (isProduction && !isBuildTime) {
 }
 
 export const auth = betterAuth({
+  appName: "Openinary",
   database: db,
   emailAndPassword: {
     enabled: true,
@@ -420,6 +445,9 @@ export const auth = betterAuth({
         timeWindow: 60000, // 1 minute
         maxRequests: 100,
       },
+    }),
+    twoFactor({
+      issuer: "Openinary",
     }),
   ],
 });

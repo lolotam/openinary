@@ -1,9 +1,10 @@
 "use client";
 
-import { HardDrive, KeyRound, Palette, User } from "lucide-react";
+import { HardDrive, KeyRound, Palette, Shield, User } from "lucide-react";
 import { useQueryState } from "nuqs";
 import { AppearanceTab, SettingsDialog as SettingsDialogShell, StorageTab } from "@openinary/ui";
 import { AccountTab } from "./account-tab";
+import { SecurityTab } from "./security-tab";
 import { ApiKeysTab } from "./api-keys-tab";
 
 interface SettingsDialogProps {
@@ -14,6 +15,7 @@ interface SettingsDialogProps {
 
 const SETTINGS_NAV = [
   { value: "account", label: "Account", icon: User },
+  { value: "security", label: "Security", icon: Shield },
   { value: "appearance", label: "Appearance", icon: Palette },
   { value: "api-keys", label: "API Keys", icon: KeyRound },
   { value: "storage", label: "Storage", icon: HardDrive },
@@ -44,6 +46,9 @@ export function SettingsDialog({
           userAvatar={userAvatar}
           isOpen={dialogOpen && activeTab === "account"}
         />
+      )}
+      {activeTab === "security" && (
+        <SecurityTab isOpen={dialogOpen && activeTab === "security"} />
       )}
       {activeTab === "appearance" && <AppearanceTab />}
       {activeTab === "api-keys" && <ApiKeysTab />}

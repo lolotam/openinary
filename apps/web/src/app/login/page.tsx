@@ -21,6 +21,7 @@ import { Spinner } from "@/components/ui/spinner";
 import logger from "@/lib/logger";
 import { validateAuthConfig } from "@/lib/validate-auth-config";
 import { VersionBadge } from "@/components/ui/version-badge";
+import { ArrowLeft, KeyRound, Loader2, Shield } from "lucide-react";
 
 const loginFormSchema = z.object({
   email: z
@@ -39,6 +40,11 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [checkingSetup, setCheckingSetup] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
+
+  // 2FA Challenge state
+  const [isTwoFactorView, setIsTwoFactorView] = useState(false);
+  const [twoFactorCode, setTwoFactorCode] = useState("");
+  const [isVerifyingTwoFactor, setIsVerifyingTwoFactor] = useState(false);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginFormSchema),
@@ -154,6 +160,13 @@ export default function LoginPage() {
         password: values.password,
       });
 
+      // Check if 2FA verification is required
+      if (result?.data && "twoFactorRedirect" in result.data && Boolean(result.data.twoFactorRedirect)) {
+        setIsTwoFactorView(true);
+        setTwoFactorCode("");
+        return;
+      }
+
       // Verify the sign-in was successful
       if (result && result.data) {
         // Wait a bit for cookie to be set, then redirect
@@ -177,6 +190,57 @@ export default function LoginPage() {
     }
   };
 
+  const handleTwoFactorVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    const rawCode = twoFactorCode.trim();
+    if (!rawCode) {
+      setError("Please enter your verification or backup recovery code");
+      return;
+    }
+
+    // Strip spaces / non-digits to support codes formatted like "123 456"
+    const digitsOnly = rawCode.replace(/\D/g, "");
+    const is6DigitCode = digitsOnly.length === 6;
+    const isBackupCode = rawCode.length >= 6;
+
+    setIsVerifyingTwoFactor(true);
+    try {
+      let result;
+      if (is6DigitCode) {
+        // Verify via TOTP Authenticator code
+        result = await authClient.twoFactor.verifyTotp({
+          code: digitsOnly,
+        });
+      } else if (isBackupCode) {
+        // Verify via Backup recovery code
+        result = await authClient.twoFactor.verifyBackupCode({
+          code: rawCode,
+        });
+      } else {
+        throw new Error("Enter a valid 6-digit authenticator code or backup recovery code");
+      }
+
+      if (result?.error) {
+        throw new Error(result.error.message || "Invalid verification code");
+      }
+
+      // Wait a bit for cookies to sync, then redirect
+      await new Promise(resolve => setTimeout(resolve, 200));
+      window.location.href = "/";
+    } catch (err) {
+      logger.error("[Login] 2FA verification error", { error: err });
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : "Invalid code. Please try again.",
+      );
+    } finally {
+      setIsVerifyingTwoFactor(false);
+    }
+  };
+
   if (checkingSetup) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -191,7 +255,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <VersionBadge />
       <div className="w-full max-w-md space-y-8">
-      <div className="flex justify-center">
+        <div className="flex justify-center">
           <Image
             src="/openinary.svg"
             alt="Openinary"
@@ -200,80 +264,158 @@ export default function LoginPage() {
             className="dark:invert"
           />
         </div>
-        <div className="text-center">
-          <h1 className="text-3xl font-bold tracking-tight">
-            Sign In
-          </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Sign in to your account
-          </p>
-        </div>
 
-        {configError && (
-          <div className="rounded-md bg-destructive/15 p-4 border border-destructive/30">
-            <pre className="text-xs text-destructive whitespace-pre-wrap font-mono">
-              {configError}
-            </pre>
-          </div>
-        )}
-
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="mt-8 space-y-6">
-            <div className="space-y-4">
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="email"
-                        placeholder="admin@example.com"
-                        autoComplete="email"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Password</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="password"
-                        placeholder="••••••••"
-                        autoComplete="current-password"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+        {isTwoFactorView ? (
+          // Two-Factor Authentication Challenge Screen
+          <div className="space-y-6">
+            <div className="text-center space-y-2">
+              <div className="mx-auto flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Shield className="size-6" />
+              </div>
+              <h1 className="text-2xl font-bold tracking-tight">
+                Two-Factor Authentication
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Enter the 6-digit code from your authenticator app or a single-use backup recovery code.
+              </p>
             </div>
 
-            {error && (
-              <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
-                {error}
+            <form onSubmit={handleTwoFactorVerify} className="space-y-5">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <FormLabel htmlFor="twoFactorCode">Verification Code</FormLabel>
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <KeyRound className="size-3" />
+                    TOTP or Backup Code
+                  </span>
+                </div>
+                <Input
+                  id="twoFactorCode"
+                  type="text"
+                  placeholder="123456"
+                  autoComplete="one-time-code"
+                  value={twoFactorCode}
+                  onChange={(e) => setTwoFactorCode(e.target.value)}
+                  className="text-center text-lg font-mono tracking-widest"
+                  autoFocus
+                />
+              </div>
+
+              {error && (
+                <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
+                  {error}
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                disabled={isVerifyingTwoFactor || !twoFactorCode.trim()}
+                className="w-full"
+              >
+                {isVerifyingTwoFactor ? (
+                  <>
+                    <Loader2 className="size-4 mr-2 animate-spin" />
+                    Verifying...
+                  </>
+                ) : (
+                  "Verify & Continue"
+                )}
+              </Button>
+
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full text-xs text-muted-foreground"
+                onClick={() => {
+                  setIsTwoFactorView(false);
+                  setTwoFactorCode("");
+                  setError("");
+                }}
+              >
+                <ArrowLeft className="size-3.5 mr-1.5" />
+                Back to sign in
+              </Button>
+            </form>
+          </div>
+        ) : (
+          // Email & Password Sign In Screen
+          <div>
+            <div className="text-center">
+              <h1 className="text-3xl font-bold tracking-tight">
+                Sign In
+              </h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Sign in to your account
+              </p>
+            </div>
+
+            {configError && (
+              <div className="rounded-md bg-destructive/15 p-4 border border-destructive/30 mt-6">
+                <pre className="text-xs text-destructive whitespace-pre-wrap font-mono">
+                  {configError}
+                </pre>
               </div>
             )}
 
-            <Button
-              type="submit"
-              disabled={form.formState.isSubmitting || !!configError}
-              className="w-full"
-            >
-              {form.formState.isSubmitting ? "Signing in..." : "Sign in"}
-            </Button>
-          </form>
-        </Form>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="mt-8 space-y-6">
+                <div className="space-y-4">
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="email"
+                            placeholder="admin@example.com"
+                            autoComplete="email"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="password"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Password</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="password"
+                            placeholder="••••••••"
+                            autoComplete="current-password"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                {error && (
+                  <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
+                    {error}
+                  </div>
+                )}
+
+                <Button
+                  type="submit"
+                  disabled={form.formState.isSubmitting || !!configError}
+                  className="w-full"
+                >
+                  {form.formState.isSubmitting ? "Signing in..." : "Sign in"}
+                </Button>
+              </form>
+            </Form>
+          </div>
+        )}
       </div>
     </div>
   );

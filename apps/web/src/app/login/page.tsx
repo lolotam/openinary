@@ -9,6 +9,7 @@ import { z } from "zod";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Form,
   FormControl,
@@ -283,7 +284,7 @@ export default function LoginPage() {
             <form onSubmit={handleTwoFactorVerify} className="space-y-5">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <FormLabel htmlFor="twoFactorCode">Verification Code</FormLabel>
+                  <Label htmlFor="twoFactorCode">Verification Code</Label>
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
                     <KeyRound className="size-3" />
                     TOTP or Backup Code

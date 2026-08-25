@@ -150,14 +150,13 @@ export function UploadSection({ uploadToFolder }: { uploadToFolder?: string }) {
 
       setUploadResult(data);
       setSelectedFiles([]);
-      // Invalidate storage queries to refresh the data
-      invalidateStorage(queryClient);
     } catch (error) {
       setUploadResult({
         success: false,
         error: error instanceof Error ? error.message : "Upload failed",
       });
     } finally {
+      invalidateStorage(queryClient);
       setUploading(false);
     }
   };

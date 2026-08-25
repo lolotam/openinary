@@ -101,7 +101,10 @@ export async function uploadFilesInBatches(opts: {
     for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
       const formData = new FormData();
       if (opts.folder) formData.append("folder", opts.folder);
-      for (const file of batch) formData.append("files", file);
+      for (const file of batch) {
+        formData.append("files", file);
+        formData.append("names", fileLabel(file));
+      }
 
       const response = await opts.fetch(opts.url, {
         method: "POST",

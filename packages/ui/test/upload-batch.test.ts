@@ -126,6 +126,36 @@ test("uploadFilesInBatches sends 127 files as 7 sequential requests", async () =
   assert.equal(result.files?.length, 127);
 });
 
+test("nested webkitRelativePath is sent as names in file order", async () => {
+  const nested = new File(["x"], "leaf.jpg", { type: "image/jpeg" });
+  Object.defineProperty(nested, "webkitRelativePath", {
+    value: "tree/sub/leaf.jpg",
+  });
+  const names: string[] = [];
+  await uploadFilesInBatches({
+    files: [nested],
+    url: "http://api/upload",
+    fetch: async (_url, init) => {
+      const body = init?.body as FormData;
+      names.push(...body.getAll("names").map(String));
+      return new Response(
+        JSON.stringify({
+          success: true,
+          files: [
+            {
+              filename: "leaf.jpg",
+              path: "tree/sub/leaf.jpg",
+              size: 1,
+              url: "/t/tree/sub/leaf.jpg",
+            },
+          ],
+        }),
+      );
+    },
+  });
+  assert.deepEqual(names, ["tree/sub/leaf.jpg"]);
+});
+
 test("429 then success retries the same batch", async () => {
   let hits = 0;
   const files = [fakeFile("a.jpg")];

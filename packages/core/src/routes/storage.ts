@@ -709,7 +709,12 @@ export function createStorageRoute(deps: RouteDeps) {
     if (storageClient) {
       return storageClient.existsOriginalPath(filePath);
     }
-    return fs.existsSync(path.join(".", "public", filePath));
+    const localPath = path.join(".", "public", filePath);
+    try {
+      return fs.statSync(localPath).isFile();
+    } catch {
+      return false;
+    }
   }
 
   async function isDirectoryPath(filePath: string): Promise<boolean> {

@@ -1248,7 +1248,7 @@ export function MediaGrid({
                                 </div>
                                 <div className="relative w-full h-full">
                                   {folder.coverPath &&
-                                  !brokenCovers.has(folder.path) &&
+                                  !brokenCovers.has(folder.coverPath) &&
                                   !hideThumbnails ? (
                                     <img
                                       src={getFolderThumbnailUrl(
@@ -1261,7 +1261,7 @@ export function MediaGrid({
                                       onError={() =>
                                         setBrokenCovers((prev) => {
                                           const next = new Set(prev);
-                                          next.add(folder.path);
+                                          next.add(folder.coverPath!);
                                           return next;
                                         })
                                       }

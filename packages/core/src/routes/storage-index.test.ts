@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Hono } from "hono";
 import { createStorageRoute } from "./storage";
 
@@ -152,6 +155,40 @@ test("POST move folder calls moveFolderPrefix", async () => {
   assert.deepEqual(calls, [
     { op: "moveFolderPrefix", args: ["album", "archive/album"] },
   ]);
+});
+
+test("local folder rename and move call moveFolderPrefix not movePath", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "openinary-local-folder-"));
+  const prev = process.cwd();
+  mkdirSync(path.join(root, "public", "album"), { recursive: true });
+  writeFileSync(path.join(root, "public", "album", "a.jpg"), "x");
+  process.chdir(root);
+  try {
+    const { index, calls } = fakeIndex();
+    const app = appFor({ index, storage: null });
+
+    const renamed = await app.request("/storage/album", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "renamed" }),
+    });
+    assert.equal(renamed.status, 200, await renamed.clone().text());
+    assert.equal(calls[0]?.op, "moveFolderPrefix");
+    assert.deepEqual(calls[0]?.args, ["album", "renamed"]);
+
+    mkdirSync(path.join(root, "public", "dest"), { recursive: true });
+    const moved = await app.request("/storage/renamed/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ destination: "dest" }),
+    });
+    assert.equal(moved.status, 200, await moved.clone().text());
+    assert.equal(calls[1]?.op, "moveFolderPrefix");
+    assert.deepEqual(calls[1]?.args, ["renamed", "dest/renamed"]);
+  } finally {
+    process.chdir(prev);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("index throw after rename still returns 200", async () => {

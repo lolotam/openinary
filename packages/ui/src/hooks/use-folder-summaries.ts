@@ -1,17 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useOpeninary } from "../provider/openinary-provider";
 import type { OpeninaryConfig } from "../provider/openinary-provider";
 import type { MediaType } from "../types";
+import { applyFolderSummaryEpoch } from "./folder-summary-cache";
 
 export type FolderSummary = {
   itemCount: number;
   truncated: boolean;
   previewItems: { path: string; type: MediaType }[];
+  coverPath?: string | null;
 };
 
 const BATCH_DELAY_MS = 40;
+
+export const FOLDER_SUMMARIES_QUERY_KEY = ["openinary", "folder-summaries"] as const;
 
 async function fetchFolderSummaries(
   { apiBaseUrl, fetch }: OpeninaryConfig,
@@ -27,11 +32,8 @@ async function fetchFolderSummaries(
 
 /**
  * Fetches folder summaries (item count + preview thumbnails) only for the
- * given paths - meant to be driven by a virtualizer so only currently
- * rendered folder tiles trigger a request, instead of every subfolder in a
- * level up front. Paths requested within the same BATCH_DELAY_MS window are
- * coalesced into a single call. Already-fetched paths are cached for the
- * lifetime of this hook instance and never refetched.
+ * given paths. `invalidateStorage` bumps `FOLDER_SUMMARIES_QUERY_KEY` so
+ * this cache is dropped after mutations.
  */
 export function useFolderSummaries(visiblePaths: string[]): Record<string, FolderSummary> {
   const openinary = useOpeninary();
@@ -39,6 +41,25 @@ export function useFolderSummaries(visiblePaths: string[]): Record<string, Folde
   const knownRef = useRef<Set<string>>(new Set());
   const pendingRef = useRef<Set<string>>(new Set());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastEpoch = useRef(0);
+  const { dataUpdatedAt } = useQuery({
+    queryKey: FOLDER_SUMMARIES_QUERY_KEY,
+    queryFn: () => 0,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
+  useEffect(() => {
+    if (
+      applyFolderSummaryEpoch(
+        dataUpdatedAt,
+        lastEpoch,
+        knownRef.current,
+        pendingRef.current,
+      )
+    ) {
+      setSummaries({});
+    }
+  }, [dataUpdatedAt]);
 
   useEffect(() => {
     const toFetch = visiblePaths.filter((p) => !knownRef.current.has(p));
@@ -62,12 +83,10 @@ export function useFolderSummaries(visiblePaths: string[]): Record<string, Folde
           setSummaries((prev) => ({ ...prev, ...fetched }));
         })
         .catch(() => {
-          // best-effort: failed paths stay unknown and can be retried
-          // if they scroll out and back into view
           for (const p of batch) knownRef.current.delete(p);
         });
     }, BATCH_DELAY_MS);
-  }, [visiblePaths, openinary]);
+  }, [visiblePaths, openinary, dataUpdatedAt]);
 
   return summaries;
 }

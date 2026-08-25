@@ -13,6 +13,8 @@ import {
   createQueueEventsRoute,
   createQueueRoute,
   createInvalidateRoute,
+  createAssetsSearchRoute,
+  createFolderThumbnailRoute,
   validateApiSecret,
   logger,
   serializeError,
@@ -25,6 +27,7 @@ import { apiKeyAuth } from "./middleware/auth";
 import { publicRateLimit } from "./middleware/rate-limit";
 import { getSharedStorage } from "./config/storage";
 import { videoJobQueue } from "./config/queue";
+import { assetIndex } from "./config/asset-index";
 
 // Validate API_SECRET at startup if authenticated routes are enabled
 // This ensures the application fails fast if the secret is not configured properly
@@ -46,6 +49,7 @@ try {
 const deps: RouteDeps = {
   storage: getSharedStorage(),
   queue: videoJobQueue,
+  assetIndex,
 };
 
 const transform = createTransformRoute(deps);
@@ -53,6 +57,8 @@ const raw = createRawRoute(deps);
 const authenticated = createAuthenticatedRoute(deps);
 const upload = createUploadRoute(deps);
 const storageRoute = createStorageRoute(deps);
+const assetsSearch = createAssetsSearchRoute(deps);
+const folderThumbnail = createFolderThumbnailRoute(deps);
 const download = createDownloadRoute(deps);
 const downloadFolder = createDownloadFolderRoute(deps);
 const downloadZip = createDownloadZipRoute(deps);
@@ -157,6 +163,14 @@ app.route("/upload", upload);
 app.use("/storage/*", compress());
 app.use("/storage/*", apiKeyAuth);
 app.route("/storage", storageRoute);
+
+app.use("/assets", apiKeyAuth);
+app.use("/assets/*", apiKeyAuth);
+app.route("/assets", assetsSearch);
+
+app.use("/folders", apiKeyAuth);
+app.use("/folders/*", apiKeyAuth);
+app.route("/folders", folderThumbnail);
 
 // Bulk ZIP download route (protected, accepts an arbitrary list of paths)
 app.use("/download-zip", apiKeyAuth);

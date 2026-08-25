@@ -28,12 +28,38 @@ import {
   getCachedFullListing,
   invalidateListingCache,
 } from "../utils/storage/listing-cache";
+import { reconcileAssetIndex } from "../utils/asset-index/reconcile";
+import type { AssetIndex } from "../utils/asset-index/types";
 
 type StorageClient = NonNullable<RouteDeps["storage"]>;
 
 export function createStorageRoute(deps: RouteDeps) {
   const { storage: storageClient, queue } = deps;
   const storageRoute = new Hono();
+  let reconcileInProgress = false;
+
+  function withIndex(label: string, fn: (index: AssetIndex) => void): void {
+    if (!deps.assetIndex) return;
+    try {
+      fn(deps.assetIndex);
+    } catch (error) {
+      logger.error(
+        { error: serializeError(error) },
+        `Asset index ${label} failed`,
+      );
+    }
+  }
+
+  function attachCoverPaths(folders: LevelFolder[]): LevelFolder[] {
+    if (folders.length === 0) {
+      return folders.map((folder) => ({ ...folder, coverPath: null }));
+    }
+    const covers = deps.assetIndex?.coversFor(folders.map((folder) => folder.path));
+    return folders.map((folder) => ({
+      ...folder,
+      coverPath: covers?.get(folder.path) ?? null,
+    }));
+  }
 
   /**
    * Full recursive listing of public/ objects (keys relative, prefix stripped),
@@ -179,14 +205,21 @@ export function createStorageRoute(deps: RouteDeps) {
 
     try {
       if (!storageClient) {
-        return c.json({ path: levelPath, ...listLocalLevel(levelPath) });
+        const local = listLocalLevel(levelPath);
+        return c.json({
+          path: levelPath,
+          folders: attachCoverPaths(local.folders),
+          files: local.files,
+        });
       }
 
       const { folderNames, files } = await storageClient.listLevel(levelPath);
-      const folders: LevelFolder[] = folderNames.map((name) => ({
-        name,
-        path: levelPath ? `${levelPath}/${name}` : name,
-      }));
+      const folders: LevelFolder[] = attachCoverPaths(
+        folderNames.map((name) => ({
+          name,
+          path: levelPath ? `${levelPath}/${name}` : name,
+        })),
+      );
 
       return c.json({ path: levelPath, folders, files });
     } catch (error) {
@@ -245,6 +278,7 @@ export function createStorageRoute(deps: RouteDeps) {
 
     try {
       const summaries: Record<string, FolderSummary> = {};
+      const covers = deps.assetIndex?.coversFor(paths);
       const batchSize = 16;
       for (let i = 0; i < paths.length; i += batchSize) {
         const batch = paths.slice(i, i + batchSize);
@@ -264,7 +298,10 @@ export function createStorageRoute(deps: RouteDeps) {
           }),
         );
         for (const [folderPath, summary] of results) {
-          summaries[folderPath] = summary;
+          summaries[folderPath] = {
+            ...summary,
+            coverPath: covers?.get(folderPath) ?? null,
+          };
         }
       }
 
@@ -438,6 +475,38 @@ export function createStorageRoute(deps: RouteDeps) {
   });
 
   /**
+   * Backfill / heal the asset index from live storage.
+   * POST /storage/reconcile
+   * Concurrent calls return 409. S3 mode is upsert-only.
+   */
+  storageRoute.post("/reconcile", async (c) => {
+    if (reconcileInProgress) {
+      return c.json({ error: "reconcile_in_progress" }, 409);
+    }
+    if (!deps.assetIndex) {
+      return c.json({ error: "Asset index unavailable" }, 503);
+    }
+
+    reconcileInProgress = true;
+    try {
+      const result = await reconcileAssetIndex({
+        storage: storageClient,
+        localRoot: "./public",
+        index: deps.assetIndex,
+      });
+      return c.json({ ok: true, ...result });
+    } catch (error) {
+      logger.error(
+        { error: serializeError(error) },
+        "Failed to reconcile asset index",
+      );
+      return c.json({ error: "Failed to reconcile asset index" }, 500);
+    } finally {
+      reconcileInProgress = false;
+    }
+  });
+
+  /**
    * Get file metadata (size, dates)
    * GET /storage/{path}/metadata
    * Note: This route must be placed after GET "/" but before DELETE "/*"
@@ -576,6 +645,7 @@ export function createStorageRoute(deps: RouteDeps) {
         filePath,
         storageClient,
         queue.getStore(),
+        deps.assetIndex,
       );
 
       if (result.success || result.originalFileDeleted) {
@@ -639,7 +709,12 @@ export function createStorageRoute(deps: RouteDeps) {
     if (storageClient) {
       return storageClient.existsOriginalPath(filePath);
     }
-    return fs.existsSync(path.join(".", "public", filePath));
+    const localPath = path.join(".", "public", filePath);
+    try {
+      return fs.statSync(localPath).isFile();
+    } catch {
+      return false;
+    }
   }
 
   async function isDirectoryPath(filePath: string): Promise<boolean> {
@@ -740,6 +815,10 @@ export function createStorageRoute(deps: RouteDeps) {
 
       await deleteCachedFiles(filePath);
       invalidateListingCache();
+      withIndex("rename", (index) => {
+        if (isFolder) index.moveFolderPrefix(filePath, newPath);
+        else index.movePath(filePath, newPath);
+      });
 
       return c.json({ success: true, path: newPath });
     } catch (error) {
@@ -831,6 +910,9 @@ export function createStorageRoute(deps: RouteDeps) {
 
         await deleteCachedFiles(filePath);
         invalidateListingCache();
+        withIndex("move-folder", (index) => {
+          index.moveFolderPrefix(filePath, newPath);
+        });
 
         return c.json({ success: true, path: newPath });
       }
@@ -869,6 +951,10 @@ export function createStorageRoute(deps: RouteDeps) {
         await deleteCachedFiles(filePath);
       }
       invalidateListingCache();
+      withIndex(isCopy ? "copy" : "move", (index) => {
+        if (isCopy) index.copyPath(filePath, newPath);
+        else index.movePath(filePath, newPath);
+      });
 
       return c.json({ success: true, path: newPath });
     } catch (error) {

@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  canonicalizeStoragePath,
   deriveFolderPaths,
   getMediaType,
+  isCoverInsideFolder,
   normalizeLevelPath,
   shapeFolderSummary,
   shapeLevel,
@@ -101,6 +103,32 @@ test('shapeFolderSummary caps preview items and keeps only media', () => {
     summary.previewItems.map((p) => p.path),
     ['a/1.png', 'a/2.mp4', 'a/4.jpg', 'a/5.webp'],
   );
+});
+
+test('canonicalizeStoragePath accepts posix relative paths and root', () => {
+  assert.equal(canonicalizeStoragePath(''), '');
+  assert.equal(canonicalizeStoragePath('hero.jpg'), 'hero.jpg');
+  assert.equal(canonicalizeStoragePath('a/b/c.jpg'), 'a/b/c.jpg');
+  assert.equal(canonicalizeStoragePath('a\\b\\c.jpg'), 'a/b/c.jpg');
+});
+
+test('canonicalizeStoragePath rejects traversal, drives, UNC, and absolute paths', () => {
+  assert.equal(canonicalizeStoragePath('..'), null);
+  assert.equal(canonicalizeStoragePath('a/../b'), null);
+  assert.equal(canonicalizeStoragePath('C:\\Windows\\hero.jpg'), null);
+  assert.equal(canonicalizeStoragePath('C:/Windows/hero.jpg'), null);
+  assert.equal(canonicalizeStoragePath('\\\\server\\share\\hero.jpg'), null);
+  assert.equal(canonicalizeStoragePath('//server/share/hero.jpg'), null);
+  assert.equal(canonicalizeStoragePath('/etc/passwd'), null);
+});
+
+test('isCoverInsideFolder enforces root and nested containment', () => {
+  assert.equal(isCoverInsideFolder('', 'hero.jpg'), true);
+  assert.equal(isCoverInsideFolder('', 'a/hero.jpg'), false);
+  assert.equal(isCoverInsideFolder('a/b', 'a/b/c.jpg'), true);
+  assert.equal(isCoverInsideFolder('cats', 'cats2/x.jpg'), false);
+  assert.equal(isCoverInsideFolder('cats', 'cats'), false);
+  assert.equal(isCoverInsideFolder('cats', 'cats/x.jpg'), true);
 });
 
 test('deriveFolderPaths includes intermediate directories and markers', () => {

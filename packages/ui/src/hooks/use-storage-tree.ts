@@ -74,4 +74,5 @@ export function useStorageFolders(options?: { enabled?: boolean }) {
 export function invalidateStorage(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ["openinary", "storage-tree"] });
   queryClient.invalidateQueries({ queryKey: ["openinary", "storage-folders"] });
+  queryClient.invalidateQueries({ queryKey: ["openinary", "folder-summaries"] });
 }

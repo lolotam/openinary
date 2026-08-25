@@ -1,5 +1,6 @@
 import type { CloudStorage } from "../utils/storage/index";
 import type { VideoJobQueue } from "../utils/video-job-queue";
+import type { AssetIndex } from "../utils/asset-index/types";
 
 /**
  * Dependencies a route factory needs to build its Hono sub-app. Every route
@@ -11,4 +12,5 @@ import type { VideoJobQueue } from "../utils/video-job-queue";
 export interface RouteDeps {
   storage: CloudStorage | null;
   queue: VideoJobQueue;
+  assetIndex?: AssetIndex | null;
 }

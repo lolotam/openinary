@@ -15,10 +15,13 @@ import {
   allowedUploadExtensions,
   logger,
   serializeError,
+  getMediaType,
+  parentFolderOf,
   type RouteDeps,
 } from "@openinary/core";
 import fs from "fs";
 import path from "path";
+import { createHash } from "crypto";
 import { presignedOrApiKeyAuth } from "../middleware/presigned-upload-auth";
 import heicConvert from "heic-convert";
 
@@ -144,6 +147,35 @@ export function createUploadRoute(deps: RouteDeps) {
   const videoJobQueue = deps.queue;
   const transformService = new TransformService(storage, videoJobQueue);
   const upload = new Hono();
+
+  function indexUploadedAsset(opts: {
+    finalPath: string;
+    size: number;
+    mime: string;
+    mtime: number;
+    buffer: Buffer;
+  }): void {
+    if (!deps.assetIndex) return;
+    try {
+      deps.assetIndex.upsertFromUpload({
+        path: opts.finalPath,
+        filename: path.basename(opts.finalPath),
+        size: opts.size,
+        mime: opts.mime,
+        mediaType: getMediaType(opts.finalPath) ?? "raw",
+        folder: parentFolderOf(opts.finalPath.replace(/\\/g, "/")),
+        contentHash: createHash("sha256").update(opts.buffer).digest("hex"),
+        thumbnailPath: null,
+        customMetadata: {},
+        mtime: opts.mtime,
+      });
+    } catch (error) {
+      logger.error(
+        { error: serializeError(error), path: opts.finalPath },
+        "Failed to index uploaded asset",
+      );
+    }
+  }
 
   async function prewarmImageTransformations(
     c: Context,
@@ -564,6 +596,13 @@ export function createUploadRoute(deps: RouteDeps) {
               }
             }
 
+            indexUploadedAsset({
+              finalPath,
+              size: normalizedBuffer.byteLength,
+              mime: normalizedContentType,
+              mtime: Date.now(),
+              buffer: normalizedBuffer,
+            });
             successfulUploads.push(uploadResult);
           } else {
             // Save locally with full path
@@ -627,6 +666,19 @@ export function createUploadRoute(deps: RouteDeps) {
               }
             }
 
+            let mtime = Date.now();
+            try {
+              mtime = fs.statSync(path.join("./public", finalPath)).mtimeMs;
+            } catch {
+              // keep Date.now()
+            }
+            indexUploadedAsset({
+              finalPath,
+              size: normalizedBuffer.byteLength,
+              mime: normalizedContentType,
+              mtime,
+              buffer: normalizedBuffer,
+            });
             successfulUploads.push(uploadResult);
           }
         } catch (error) {

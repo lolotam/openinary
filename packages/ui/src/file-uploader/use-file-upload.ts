@@ -178,6 +178,34 @@ export function validateFile(
   return null;
 }
 
+/**
+ * Merge dropzone accepted files with rejections that our accept map still
+ * allows. react-dropzone matches on the browser-reported MIME first, so a
+ * Windows zip (`application/x-compressed`) or empty-type html can land in
+ * `fileRejections` even when the extension is whitelisted — and the picker
+ * then looks like a no-op.
+ */
+export function filesFromDropzone(
+  acceptedFiles: File[],
+  rejections: ReadonlyArray<{ file: File }>,
+  accept: Record<string, string[]>,
+): { files: File[]; rejectedNames: string[] } {
+  const recovered: File[] = [];
+  const rejectedNames: string[] = [];
+  for (const rejection of rejections) {
+    // Infinity: the dropzone this feeds sets no maxSize, so the only size
+    // limit that exists is the API's and it reports its own error.
+    if (
+      validateFile(rejection.file, accept, Number.POSITIVE_INFINITY) === null
+    ) {
+      recovered.push(rejection.file);
+    } else {
+      rejectedNames.push(rejection.file.name);
+    }
+  }
+  return { files: [...acceptedFiles, ...recovered], rejectedNames };
+}
+
 interface XhrUploadArgs {
   file: FileUploadState;
   baseUrl: string;

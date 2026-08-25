@@ -39,3 +39,26 @@ test("react is not bundled into the client entry", () => {
   // proof react was left external rather than inlined by esbuild.
   assert.match(contents, /from ?["']react(\/jsx-runtime)?["']/);
 });
+
+test("built DEFAULT_ACCEPT includes zip and html", () => {
+  // The dashboard imports @openinary/ui from dist. A stale bundle that still
+  // only listed images/video made the dropzone silently drop zip/html after
+  // the file dialog closed.
+  const contents = readFileSync(join(distDir, "index.js"), "utf8");
+  assert.match(contents, /"application\/zip"/);
+  assert.match(contents, /"text\/html"/);
+  assert.match(contents, /"\.zip"/);
+  assert.match(contents, /"\.html"/);
+});
+
+test("dashboard dropzone opts out of the File System Access picker", () => {
+  // react-dropzone only reads the <input accept> when useFsAccessApi is off.
+  // Left on, Chrome opens window.showOpenFilePicker instead and builds the
+  // Explorer filter itself — zip/html never showed up there even though the
+  // accept map listed them, so the file dialog looked empty for those types.
+  const contents = readFileSync(join(distDir, "index.js"), "utf8");
+  assert.ok(
+    contents.includes("useFsAccessApi: false"),
+    "dist/index.js does not disable the File System Access picker",
+  );
+});

@@ -63,7 +63,7 @@ import { CreateFolderButtonWithDialog } from "./components/create-folder-button-
 import { UploadSection } from "./components/upload-section";
 import { CreateFolderSection } from "./components/create-folder-section";
 import { BulkActionBarContent } from "./components/bulk-action-bar";
-import type { MediaFile } from "./types";
+import type { MediaFile, MediaType } from "./types";
 
 const MIME_TYPES: Record<string, string> = {
   jpg: "image/jpeg",
@@ -1127,20 +1127,29 @@ export function MediaGrid({
                             ? []
                             : summary.previewItems;
                         const renderPreview = (
-                          item: { path: string; type: "image" | "video" },
+                          item: { path: string; type: MediaType },
                           size: "square" | "tall" | "large",
-                        ) => (
-                          <VideoThumbnail
-                            src={getFolderThumbnailUrl(
-                              transformBaseUrl,
-                              item,
-                              size,
-                            )}
-                            alt=""
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        );
+                        ) => {
+                          if (item.type !== "image" && item.type !== "video") {
+                            return <FileTypeIcon type={item.type} />;
+                          }
+                          const media = {
+                            path: item.path,
+                            type: item.type,
+                          };
+                          return (
+                            <VideoThumbnail
+                              src={getFolderThumbnailUrl(
+                                transformBaseUrl,
+                                media,
+                                size,
+                              )}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          );
+                        };
                         return (
                           <ContextMenu
                             key={folder.path}

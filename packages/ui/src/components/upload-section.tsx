@@ -16,8 +16,12 @@ import {
   XCircle,
 } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
-import { useDropzone } from "react-dropzone";
-import { DEFAULT_ACCEPT, validateFile } from "../file-uploader/use-file-upload";
+import { useDropzone, type FileRejection } from "react-dropzone";
+import {
+  DEFAULT_ACCEPT,
+  filesFromDropzone,
+  validateFile,
+} from "../file-uploader/use-file-upload";
 
 interface UploadResult {
   filename: string;
@@ -55,24 +59,51 @@ export function UploadSection({ uploadToFolder }: { uploadToFolder?: string }) {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    setSelectedFiles(acceptedFiles.filter((file) => !isIgnoredFile(file)));
-    setUploadResult(null);
-  }, []);
+  const onDrop = useCallback(
+    (acceptedFiles: File[], fileRejections: FileRejection[]) => {
+      const { files, rejectedNames } = filesFromDropzone(
+        acceptedFiles,
+        fileRejections,
+        DEFAULT_ACCEPT,
+      );
+      if (rejectedNames.length > 0) {
+        const names = rejectedNames.slice(0, 4);
+        const extra =
+          rejectedNames.length > names.length
+            ? ` and ${rejectedNames.length - names.length} more`
+            : "";
+        toast.error(`File type not allowed: ${names.join(", ")}${extra}`);
+      }
+      const usable = files.filter((file) => !isIgnoredFile(file));
+      // An all-rejected drop used to replace the queue with [] so picking a
+      // zip/html looked like a no-op after the file dialog closed.
+      if (usable.length === 0) return;
+      setSelectedFiles(usable);
+      setUploadResult(null);
+    },
+    [],
+  );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     // Mirrors the API's ALLOWED_TYPES. The previous "image/*" / "video/*"
     // wildcards let the picker accept files (svg, tiff, mkv…) the API rejects.
     accept: DEFAULT_ACCEPT,
+    // Keeps the click on the plain <input accept>. Left on (its default in a
+    // secure context) react-dropzone never touches that input: it calls
+    // window.showOpenFilePicker instead and the browser builds the file
+    // dialog's filter, which offered no zip/html/office files even though
+    // DEFAULT_ACCEPT lists them. FileUploader ships the same extension list
+    // on a plain input and does not have the problem.
+    useFsAccessApi: false,
   });
 
   const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     // webkitdirectory ignores the input's `accept`, so a folder picked here
-    // hands over everything inside it - the dropzone above filters by
-    // DEFAULT_ACCEPT, this path did not, and a single stray .txt or .zip made
-    // the API reject the whole batch. Size is left to the server (Infinity):
-    // this component has no per-plan limit to check against.
+    // hands over everything inside it. Dropzone filters by DEFAULT_ACCEPT;
+    // this path must too, or a stray disallowed type makes the API reject
+    // the whole batch. Size is left to the server (Infinity): this component
+    // has no per-plan limit to check against.
     const files = Array.from(e.target.files || []).filter(
       (file) =>
         !isIgnoredFile(file) &&
@@ -200,8 +231,8 @@ export function UploadSection({ uploadToFolder }: { uploadToFolder?: string }) {
                   Drop files here, or click to select files
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Supports: JPG, PNG, WebP, AVIF, GIF, HEIC, PSD, MP4, MOV,
-                  WebM
+                  Images, video, audio, 3D, ZIP, HTML, PDF, office docs, and
+                  data files
                 </p>
                 <div className="flex gap-2 mt-2">
                   <Button

@@ -18,7 +18,7 @@ acting — they were accurate on the compile date.
 
 ## Where this fork stands
 
-`lolotam/openinary` is **5 commits ahead, 2 behind** `openinary/openinary@main`.
+`lolotam/openinary` is **ahead of** `openinary/openinary@main` (re-check with the compare command at the bottom). Merge `19baf21` (PR **#2**) landed the three items below.
 
 **Ahead — fork-only work:**
 
@@ -26,6 +26,21 @@ acting — they were accurate on the compile date.
 - Root `Dockerfile` / compose deployment on port 3000 — `f88e2a0`
 - Raw and document asset support: zip, pdf, html, Office, json — `4c76d90` (PR #1)
 - Upload picker fix for those new types — `eef0dfd`
+- Asset index, folder covers, and batched bulk uploads — `19baf21` (PR **#2**)
+
+---
+
+## Done on this fork (2026-08-25, PR #2)
+
+Verified in source on `main`. These were the three items requested and they are implemented.
+
+| Item | What shipped | Where |
+| --- | --- | --- |
+| **1. Bulk-upload hang (~127 files)** | Dashboard uploads go in sequential batches of **20**, not one giant multipart. HTTP 429 is retried up to **3 total attempts** with wait clamped to **1–60s**. A persistent 429 stops later batches and keeps already-succeeded files. Nested folder paths are sent as `names`. | `packages/ui/src/components/upload-batch.ts`, wired in `upload-section.tsx`. Tests: `packages/ui/test/upload-batch.test.ts` (127 files → 7 requests). Upstream issue **#135** / PR **#138**. |
+| **2. Asset index + search** | SQLite `assets` table + FTS5 over filename, path, and `custom_metadata`. Upload/delete/rename/copy/move keep the index coherent. Live folder listing (`readdirSync` / S3) is unchanged. `GET /assets/search?q=&type=&folder=` is auth-protected. Dashboard header has a search bar with type filter. | Schema/store: `packages/core/src/utils/asset-index/`. Routes: `GET /assets/search`. UI: `packages/ui/src/components/asset-search.tsx`. **Not shipped:** tags, a metadata editor, replacing listing with the index. |
+| **3. Folder covers** | `POST /folders/thumbnail` and `DELETE /folders/thumbnail` store a cover image path per folder. Listing includes `coverPath`. Grid tiles render that image with immediate `onError` fallback. Context menu **Set as Folder Cover** is **off by default** (`folderCoverEnabled`); self-hosted dashboard turns it on, Cloud stays off. | API: `packages/core/src/routes/folder-thumbnail.ts`. UI: `packages/ui/src/media-grid.tsx`. |
+
+Gates that passed on the merge: `pnpm --filter @openinary/core test` (166), `pnpm --filter api test` (17), `pnpm --filter @openinary/ui test` (25). `/t` and `/raw` (including 416 ranges) were not changed.
 
 **Behind — not yet pulled:**
 
@@ -56,17 +71,15 @@ Cheapest work with real value. Do this before starting anything new.
 These are upstream's currently-open issues. The ordering is a judgment call
 about relevance to this fork, not upstream's own priority.
 
-| # | Issue | Why it matters here | Status upstream |
-| --- | --- | --- | --- |
-| 135 | Large bulk uploads hang when selecting 127 files | Same component this fork just fixed (`upload-section.tsx`); the fork now accepts more file types, so batches get bigger | PR **#138** open |
-| 102 | Cached derivatives served with the source file's Content-Type, inconsistent ETag | This fork widened what gets delivered (zip/pdf/html), so a wrong `Content-Type` on a cached derivative is now a broader correctness problem | No PR |
-| 136 | JPEG processing fails with `VipsJpeg Invalid SOS parameters` | Core image path | PR **#137** open |
-| 78 | Restrictive Nginx max file size | Fork-specific: this fork ships its own `Dockerfile`/compose, so the limit has to be set in *this* deployment | No PR |
-| 56 | Delete or move uploads (documentation) | Docs gap | No PR |
+| # | Issue | Why it matters here | Status upstream | This fork |
+| --- | --- | --- | --- | --- |
+| 135 | Large bulk uploads hang when selecting 127 files | Dashboard folder uploads | PR **#138** open | **Done** — batched uploads of 20 (PR **#2**) |
+| 102 | Cached derivatives served with the source file's Content-Type, inconsistent ETag | This fork widened what gets delivered (zip/pdf/html), so a wrong `Content-Type` on a cached derivative is now a broader correctness problem | No PR | Open |
+| 136 | JPEG processing fails with `VipsJpeg Invalid SOS parameters` | Core image path | PR **#137** open | Open |
+| 78 | Restrictive Nginx max file size | Fork-specific: this fork ships its own `Dockerfile`/compose, so the limit has to be set in *this* deployment | No PR | Open |
+| 56 | Delete or move uploads (documentation) | Docs gap | No PR | Open |
 
-**Recommendation:** #135 first. It is adjacent to code just touched, a fix
-already exists upstream to review rather than write, and bulk upload is the
-workflow most affected by the new asset types.
+**Recommendation:** #102 next among upstream bugs. #135 is already fixed here.
 
 ---
 
@@ -90,9 +103,11 @@ against effort — a judgment call, stated so you can disagree with it.
 
 ### Medium term
 
-4. **Tags, custom metadata, and search** — the DAM table is almost entirely
-   `✗`. Search is unusable-at-scale territory once a library grows, and the
-   dashboard already has folder browsing to hang it off.
+4. **Tags and a custom-metadata editor** — FTS search by filename, path, and
+   stored `custom_metadata` **shipped** on this fork (PR **#2**, dashboard
+   header + `GET /assets/search`). The comparison row is still `✗` for
+   Cloudinary-style **tags** and a metadata editor; those remain open. Folder
+   covers also shipped here and are not in that comparison table.
 5. **Webhooks** — upload-complete and transform-complete. Currently `✗` while
    SSE queue events exist, so the eventing primitives are half-built already.
    This is the main blocker for third-party integration.
@@ -121,9 +136,9 @@ today. Chasing them is unlikely to be a good use of a fork's effort.
 - **2FA has no docs.** It exists in code (`8309ec1`) but is not documented in
   `apps/docs`. Either document it or upstream it — undocumented auth features
   get misconfigured.
-- **Divergence strategy.** At 5 commits ahead, rebasing is easy. That stops
-  being true fast. Decide now whether this fork upstreams its work or accepts
-  permanent divergence.
+- **Divergence strategy.** This fork is further ahead after PR **#2**. Decide
+  whether to upstream batched uploads / asset search / folder covers or accept
+  permanent divergence. Rebasing gets harder from here.
 - **Storage prefix** — upstream PR **#133** makes the media storage prefix
   configurable. Relevant if this deployment needs a non-default bucket layout.
 

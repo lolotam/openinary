@@ -4,6 +4,7 @@ import logger, { serializeError } from "./logger";
 import { CloudStorage } from "./storage/cloud-storage";
 import { deleteCachedFiles } from "./cache";
 import type { VideoJobStore } from "./video/queue-store";
+import type { AssetIndex } from "./asset-index/types";
 
 export interface DeleteAssetResult {
   success: boolean;
@@ -14,6 +15,26 @@ export interface DeleteAssetResult {
   errors: string[];
 }
 
+function unindexDeletedAsset(
+  assetIndex: AssetIndex | null | undefined,
+  filePath: string,
+  isFolder: boolean,
+): void {
+  if (!assetIndex) return;
+  try {
+    if (isFolder) {
+      assetIndex.removeByFolderPrefix(filePath);
+    } else {
+      assetIndex.removeByPath(filePath);
+    }
+  } catch (error) {
+    logger.error(
+      { error: serializeError(error), filePath, isFolder },
+      "Failed to unindex deleted asset",
+    );
+  }
+}
+
 /**
  * Deletes an asset and all its related cached files and jobs
  * This is the central function for complete asset deletion
@@ -22,6 +43,7 @@ export async function deleteAssetCompletely(
   filePath: string,
   storage: CloudStorage | null,
   jobStore: VideoJobStore,
+  assetIndex?: AssetIndex | null,
 ): Promise<DeleteAssetResult> {
   const result: DeleteAssetResult = {
     success: false,
@@ -37,6 +59,7 @@ export async function deleteAssetCompletely(
   try {
     // Step 1: Verify that the file exists
     let fileExists = false;
+    let deletedFolder = false;
 
     if (storage) {
       fileExists = await storage.existsOriginal(filePath);
@@ -48,6 +71,7 @@ export async function deleteAssetCompletely(
           logger.info({ filePath, deleted }, "Deleted cloud folder");
           result.originalFileDeleted = true;
           result.success = true;
+          unindexDeletedAsset(assetIndex, filePath, true);
           return result;
         }
       }
@@ -136,9 +160,17 @@ export async function deleteAssetCompletely(
           });
 
           for (const content of folderContents) {
-            const contentPath = path.join(localPath, content.name);
-            await deleteAssetCompletely(contentPath, storage, jobStore);
+            const childRel = filePath
+              ? `${filePath.replace(/\\/g, "/")}/${content.name}`
+              : content.name;
+            await deleteAssetCompletely(
+              childRel,
+              storage,
+              jobStore,
+              assetIndex,
+            );
           }
+          deletedFolder = true;
         }
 
         fs.rmSync(localPath, { force: false, recursive: true });
@@ -156,6 +188,10 @@ export async function deleteAssetCompletely(
 
     // Determine overall success
     result.success = result.originalFileDeleted && result.errors.length === 0;
+
+    if (result.originalFileDeleted) {
+      unindexDeletedAsset(assetIndex, filePath, deletedFolder);
+    }
 
     logger.info(
       {

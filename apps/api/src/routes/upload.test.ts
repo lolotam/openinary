@@ -116,6 +116,64 @@ test("POST /upload rejects hidden dotfiles", async () => {
   assert.match((await res.json()).errors[0].error, /Invalid file path/);
 });
 
+test("POST /upload indexes the final path after a successful save", async () => {
+  const uploaded: { path: string; buffer: Buffer; contentType: string }[] = [];
+  const indexed: unknown[] = [];
+  const app = new Hono();
+  app.route(
+    "/upload",
+    createUploadRoute({
+      ...fakeDeps(uploaded),
+      assetIndex: {
+        upsertFromUpload: (input: unknown) => {
+          indexed.push(input);
+          return input;
+        },
+      },
+    } as any),
+  );
+
+  const res = await app.request("/upload", {
+    method: "POST",
+    body: signedForm("photos", [
+      new File([jpegBytes], "hero.jpg", { type: "image/jpeg" }),
+    ]),
+  });
+  assert.equal(res.status, 200, await res.clone().text());
+  assert.equal(indexed.length, 1);
+  const row = indexed[0] as { path: string; filename: string; mediaType: string };
+  assert.equal(row.path, "photos/hero.jpg");
+  assert.equal(row.filename, "hero.jpg");
+  assert.equal(row.mediaType, "image");
+});
+
+test("POST /upload still returns 200 when indexing throws", async () => {
+  const uploaded: { path: string; buffer: Buffer; contentType: string }[] = [];
+  const app = new Hono();
+  app.route(
+    "/upload",
+    createUploadRoute({
+      ...fakeDeps(uploaded),
+      assetIndex: {
+        upsertFromUpload: () => {
+          throw new Error("index down");
+        },
+      },
+    } as any),
+  );
+
+  const res = await app.request("/upload", {
+    method: "POST",
+    body: signedForm("photos", [
+      new File([jpegBytes], "hero.jpg", { type: "image/jpeg" }),
+    ]),
+  });
+  assert.equal(res.status, 200, await res.clone().text());
+  const json = await res.json();
+  assert.equal(json.success, true);
+  assert.equal(json.files[0].path, "photos/hero.jpg");
+});
+
 test("POST /upload accepts a zip with an empty browser MIME", async () => {
   const uploaded: { path: string; buffer: Buffer; contentType: string }[] = [];
   const app = new Hono();

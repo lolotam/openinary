@@ -29,7 +29,7 @@
     "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\" && tsup",
     "dev": "tsup --watch",
     "type-check": "tsc --noEmit",
-    "test": "node --import tsx --test $(find test -name '*.test.ts')"
+    "test": "node scripts/run-node-tests.mjs test"
   },
   "peerDependencies": {
     "@tanstack/react-query": "^5.0.0",

@@ -9,6 +9,7 @@ export type FolderSummary = {
   itemCount: number;
   truncated: boolean;
   previewItems: { path: string; type: MediaType }[];
+  coverPath?: string | null;
 };
 
 const BATCH_DELAY_MS = 40;

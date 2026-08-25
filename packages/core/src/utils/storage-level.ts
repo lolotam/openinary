@@ -28,12 +28,14 @@ export type LevelFile = {
 export type LevelFolder = {
   name: string;
   path: string;
+  coverPath?: string | null;
 };
 
 export type FolderSummary = {
   itemCount: number;
   truncated: boolean;
   previewItems: FolderPreviewItem[];
+  coverPath?: string | null;
 };
 
 type ListedObject = { key: string; size?: number; lastModified?: Date };
@@ -67,6 +69,33 @@ export function normalizeLevelPath(raw: string): string | null {
     }
   }
   return segments.join("/");
+}
+
+/**
+ * Canonical posix storage path: relative, no drive letter, no UNC, no `..`.
+ * Returns "" for the bucket/root, null when the path is unsafe.
+ */
+export function canonicalizeStoragePath(raw: string): string | null {
+  const posix = raw.replace(/\\/g, "/");
+  if (/^[A-Za-z]:/.test(posix) || posix.startsWith("//") || posix.startsWith("/")) {
+    return null;
+  }
+  return normalizeLevelPath(posix);
+}
+
+/**
+ * Cover image `path` must be a file inside `folder`. Never `path === folder`.
+ * Root (`folder === ""`): cover has no `/`. Nested: cover starts with `folder + "/"`.
+ */
+export function isCoverInsideFolder(folder: string, coverPath: string): boolean {
+  if (!coverPath || coverPath === folder) return false;
+  if (folder === "") return !coverPath.includes("/");
+  return coverPath.startsWith(`${folder}/`);
+}
+
+export function parentFolderOf(filePath: string): string {
+  const i = filePath.lastIndexOf("/");
+  return i === -1 ? "" : filePath.slice(0, i);
 }
 
 /**

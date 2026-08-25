@@ -2,7 +2,7 @@
 
 import { LayoutGrid, List } from "lucide-react";
 import { useQueryState } from "nuqs";
-import { ColumnCountSlider, DeleteFolderButton, UploadButtonWithDialog } from "@openinary/ui";
+import { AssetSearch, ColumnCountSlider, DeleteFolderButton, UploadButtonWithDialog } from "@openinary/ui";
 import { Button } from "./ui/button";
 import {
   Breadcrumb,
@@ -20,11 +20,13 @@ export default function HeaderBar({
   onColumnsChange,
   view = "grid",
   onViewChange,
+  onNavigate,
 }: {
   columns: number;
   onColumnsChange: (columns: number) => void;
   view?: "grid" | "list";
   onViewChange?: (view: "grid" | "list") => void;
+  onNavigate?: (target: { folder: string | null; asset: string }) => void;
 }) {
   const [folderPath, setFolderPath] = useQueryState("folder");
 
@@ -79,6 +81,9 @@ export default function HeaderBar({
                   })}
             </BreadcrumbList>
           </Breadcrumb>
+          {onNavigate ? (
+            <AssetSearch folder={folderPath} onNavigate={onNavigate} />
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           {folderPath && (

@@ -6,8 +6,9 @@ import { auth } from "shared/auth";
 import fs from "fs";
 import path from "path";
 import { randomUUID } from "crypto";
-import { logger, serializeError } from "@openinary/core";
+import { logger, serializeError, reconcileAssetIndex } from "@openinary/core";
 import { videoJobQueue } from "./config/queue";
+import { assetIndex } from "./config/asset-index";
 import { initTelemetry } from "./utils/telemetry";
 
 // Function to clean local cache in cloud mode on startup
@@ -156,6 +157,17 @@ serve({
 });
 
 logger.info({ port }, "Server running");
+
+void reconcileAssetIndex({
+  storage: getSharedStorage(),
+  localRoot: "./public",
+  index: assetIndex,
+}).catch((error) => {
+  logger.error(
+    { error: serializeError(error) },
+    "Asset index reconcile failed",
+  );
+});
 
 // Anonymous usage telemetry (non-blocking, opt-out via OPENINARY_TELEMETRY=false)
 initTelemetry();

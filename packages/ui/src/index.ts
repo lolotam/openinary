@@ -53,6 +53,7 @@ export { useAssetDetails } from "./details-sidebar/use-asset-details";
 export { MoveToNavigator } from "./components/move-to-navigator";
 export { BulkActionBarContent } from "./components/bulk-action-bar";
 export { UploadSection } from "./components/upload-section";
+export { AssetSearch, type AssetSearchHit } from "./components/asset-search";
 export { CreateFolderSection } from "./components/create-folder-section";
 export { DeleteFolderButton } from "./components/delete-folder-button";
 export { UploadButtonWithDialog } from "./components/upload-button-with-dialog";

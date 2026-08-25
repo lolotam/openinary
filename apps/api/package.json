@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
     "type-check": "tsc --noEmit",
-    "test": "node --import tsx --test $(find src -name '*.test.ts')"
+    "test": "node scripts/run-node-tests.mjs src"
   },
   "dependencies": {
     "@hono/node-server": "^1.8.0",

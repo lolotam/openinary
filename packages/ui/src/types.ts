@@ -10,6 +10,7 @@ export type MediaFile = {
 export type StorageFolder = {
   name: string;
   path: string;
+  coverPath?: string | null;
 };
 
 export type StorageFile = {

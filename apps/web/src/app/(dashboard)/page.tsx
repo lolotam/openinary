@@ -109,6 +109,10 @@ function HomePageContent() {
                 onColumnsChange={handleColumnsChange}
                 view={view}
                 onViewChange={handleViewChange}
+                onNavigate={({ folder, asset }) => {
+                  setFolderPath(folder);
+                  setAssetId(asset);
+                }}
               />
               <div
                 ref={scrollContainerRef}
@@ -122,6 +126,7 @@ function HomePageContent() {
                   scrollContainerRef={scrollContainerRef}
                   folderPath={folderPath}
                   onFolderPathChange={setFolderPath}
+                  folderCoverEnabled
                 />
               </div>
             </ResizablePanel>

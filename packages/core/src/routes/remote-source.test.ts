@@ -82,7 +82,7 @@ test("a source URL is staged to a temp file, ahead of storage", async () => {
       SIGNED,
     );
     assert.equal(asked, SIGNED);
-    assert.match(staged, /^\.?\/?temp\//, "staged under ./temp");
+    assert.match(staged, /^\.?[/\\]?temp[/\\]/, "staged under ./temp");
     assert.deepEqual([...(await readFile(staged))], [1, 2, 3, 4]);
     await rm(staged, { force: true });
   } finally {

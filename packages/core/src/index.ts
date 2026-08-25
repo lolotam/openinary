@@ -40,6 +40,8 @@ export { createTransformRoute } from "./routes/transform";
 export { createRawRoute } from "./routes/raw";
 export { createAuthenticatedRoute } from "./routes/authenticated";
 export { createStorageRoute } from "./routes/storage";
+export { createAssetsSearchRoute } from "./routes/assets-search";
+export { createFolderThumbnailRoute } from "./routes/folder-thumbnail";
 export { createDownloadRoute } from "./routes/download";
 export { createDownloadFolderRoute } from "./routes/download-folder";
 export { createDownloadZipRoute } from "./routes/download-zip";
@@ -69,3 +71,21 @@ export {
 } from "./utils/upload-validation";
 export { deleteAssetCompletely, type DeleteAssetResult } from "./utils/asset-deletion";
 export { default as logger, serializeError } from "./utils/logger";
+export {
+  canonicalizeStoragePath,
+  getMediaType,
+  isCoverInsideFolder,
+  parentFolderOf,
+  normalizeLevelPath,
+} from "./utils/storage-level";
+export {
+  ensureAssetIndexSchema,
+  SqliteAssetIndex,
+  reconcileAssetIndex,
+  sanitizeFtsQuery,
+  type AssetIndex,
+  type AssetRecord,
+  type SearchParams,
+  type SearchResult,
+  type ReconcileResult,
+} from "./utils/asset-index";

@@ -22,6 +22,7 @@ import {
   filesFromDropzone,
   validateFile,
 } from "../file-uploader/use-file-upload";
+import { uploadFilesInBatches } from "./upload-batch";
 
 interface UploadResult {
   filename: string;
@@ -125,24 +126,16 @@ export function UploadSection({ uploadToFolder }: { uploadToFolder?: string }) {
     setUploading(true);
     setUploadResult(null);
 
-    const formData = new FormData();
-
-    if (uploadToFolder) formData.append("folder", uploadToFolder);
-
-    selectedFiles.forEach((file) => {
-      formData.append("files", file);
-    });
-
     const fileCount = selectedFiles.length;
 
     const upload = async () => {
-      const response = await fetch(`${apiBaseUrl}/upload`, {
-        method: "POST",
-        body: formData,
+      const data = await uploadFilesInBatches({
+        files: selectedFiles,
+        folder: uploadToFolder,
+        fetch,
+        url: `${apiBaseUrl}/upload`,
       });
-
-      const data: UploadResponse = await response.json();
-      if (!data.success) {
+      if (!data.success && (!data.files || data.files.length === 0)) {
         throw new Error(data.error || "Upload failed");
       }
       return data;

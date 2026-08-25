@@ -20,6 +20,7 @@ import {
   Trash2,
   Upload,
   FolderPlus,
+  Image as ImageIcon,
   X,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -120,6 +121,7 @@ function formatListDate(mtime?: string): string {
 type FolderItem = {
   name: string;
   path: string;
+  coverPath?: string | null;
 };
 
 type SelectionEntry = { path: string; name: string; kind: "file" | "folder" };
@@ -165,6 +167,10 @@ export interface MediaGridProps {
   emptyActions?: React.ReactNode;
   /** Replaces the empty-state footer link ("Learn More"). */
   emptyFooter?: React.ReactNode;
+  /** Opt-in folder cover actions. Cloud stays off unless it passes true. */
+  folderCoverEnabled?: boolean;
+  onSetFolderCover?: (args: { folder: string; path: string }) => Promise<void>;
+  onClearFolderCover?: (args: { folder: string }) => Promise<void>;
 }
 
 export function MediaGrid({
@@ -178,6 +184,9 @@ export function MediaGrid({
   beamProps,
   emptyActions,
   emptyFooter,
+  folderCoverEnabled = false,
+  onSetFolderCover,
+  onClearFolderCover,
 }: MediaGridProps) {
   const { apiBaseUrl, transformBaseUrl, fetch } = useOpeninary();
   const [hideThumbnails] = useHideThumbnails();
@@ -189,6 +198,7 @@ export function MediaGrid({
   // is only rendered for the hovered row or the row whose menu is open.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [brokenCovers, setBrokenCovers] = useState<Set<string>>(new Set());
   const setFolderPath = onFolderPathChange ?? (() => {});
 
   // Bulk selection state
@@ -602,6 +612,55 @@ export function MediaGrid({
       invalidateStorage(queryClient);
     } catch {
       // error toast already shown
+    }
+  };
+
+  const handleSetFolderCover = async (path: string) => {
+    const folder = currentDir;
+    try {
+      if (onSetFolderCover) {
+        await onSetFolderCover({ folder, path });
+      } else {
+        const response = await fetch(`${apiBaseUrl}/folders/thumbnail`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ folder, path }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          throw new Error(data?.error || "Failed to set folder cover");
+        }
+      }
+      toast.success("Folder cover updated");
+      invalidateStorage(queryClient);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to set folder cover",
+      );
+    }
+  };
+
+  const handleClearFolderCover = async (folder: string) => {
+    try {
+      if (onClearFolderCover) {
+        await onClearFolderCover({ folder });
+      } else {
+        const response = await fetch(`${apiBaseUrl}/folders/thumbnail`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ folder }),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          throw new Error(data?.error || "Failed to reset folder cover");
+        }
+      }
+      toast.success("Folder cover reset");
+      invalidateStorage(queryClient);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to reset folder cover",
+      );
     }
   };
 
@@ -1188,7 +1247,26 @@ export function MediaGrid({
                                   />
                                 </div>
                                 <div className="relative w-full h-full">
-                                  {previewItems.length === 4 ? (
+                                  {folder.coverPath &&
+                                  !brokenCovers.has(folder.path) &&
+                                  !hideThumbnails ? (
+                                    <img
+                                      src={getFolderThumbnailUrl(
+                                        transformBaseUrl,
+                                        { path: folder.coverPath, type: "image" },
+                                        "large",
+                                      )}
+                                      alt=""
+                                      className="w-full h-full object-cover"
+                                      onError={() =>
+                                        setBrokenCovers((prev) => {
+                                          const next = new Set(prev);
+                                          next.add(folder.path);
+                                          return next;
+                                        })
+                                      }
+                                    />
+                                  ) : previewItems.length === 4 ? (
                                     <div className="grid grid-cols-2 gap-0.5 w-full h-full">
                                       {previewItems.map((item, i) => (
                                         <div
@@ -1315,6 +1393,17 @@ export function MediaGrid({
                                   <Download className="h-4 w-4" />
                                   Download folder
                                 </ContextMenuItem>
+                                {folderCoverEnabled && folder.coverPath ? (
+                                  <ContextMenuItem
+                                    onClick={(e: React.MouseEvent) => {
+                                      e.stopPropagation();
+                                      handleClearFolderCover(folder.path);
+                                    }}
+                                  >
+                                    <ImageIcon className="h-4 w-4" />
+                                    Reset Folder Cover
+                                  </ContextMenuItem>
+                                ) : null}
                                 <ContextMenuSeparator />
                                 <ContextMenuItem
                                   onClick={(e: React.MouseEvent) => {
@@ -1564,6 +1653,17 @@ export function MediaGrid({
                               <Download className="h-4 w-4" />
                               Download folder
                             </ContextMenuItem>
+                            {folderCoverEnabled && folder.coverPath ? (
+                              <ContextMenuItem
+                                onClick={(e: React.MouseEvent) => {
+                                  e.stopPropagation();
+                                  handleClearFolderCover(folder.path);
+                                }}
+                              >
+                                <ImageIcon className="h-4 w-4" />
+                                Reset Folder Cover
+                              </ContextMenuItem>
+                            ) : null}
                             <ContextMenuSeparator />
                             <ContextMenuItem
                               onClick={(e: React.MouseEvent) => {
@@ -1724,6 +1824,17 @@ export function MediaGrid({
                                     <Copy className="h-4 w-4" />
                                     Make a copy
                                   </ContextMenuItem>
+                                  {folderCoverEnabled &&
+                                    media.type === "image" && (
+                                      <ContextMenuItem
+                                        onClick={() =>
+                                          handleSetFolderCover(media.path)
+                                        }
+                                      >
+                                        <ImageIcon className="h-4 w-4" />
+                                        Set as Folder Cover
+                                      </ContextMenuItem>
+                                    )}
                                   <ContextMenuSub>
                                     <ContextMenuSubTrigger>
                                       <Move className="h-4 w-4" />
@@ -1974,6 +2085,14 @@ export function MediaGrid({
                               <Copy className="h-4 w-4" />
                               Make a copy
                             </ContextMenuItem>
+                            {folderCoverEnabled && media.type === "image" && (
+                              <ContextMenuItem
+                                onClick={() => handleSetFolderCover(media.path)}
+                              >
+                                <ImageIcon className="h-4 w-4" />
+                                Set as Folder Cover
+                              </ContextMenuItem>
+                            )}
                             <ContextMenuSub>
                               <ContextMenuSubTrigger>
                                 <Move className="h-4 w-4" />

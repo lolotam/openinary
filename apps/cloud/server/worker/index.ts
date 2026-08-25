@@ -315,6 +315,10 @@ async function serveOriginalFallback(
     headers.set("Content-Length", "0");
     headers.set("Cache-Control", cacheControl);
     headers.set("Access-Control-Allow-Origin", "*");
+    headers.set(
+      "Access-Control-Expose-Headers",
+      "Content-Length, Content-Range, Accept-Ranges",
+    );
     return new Response(null, { status: 416, headers });
   }
   const object = range

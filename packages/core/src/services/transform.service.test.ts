@@ -258,6 +258,28 @@ test("originalsOnly streams a jpeg without injecting a format", async () => {
   assert.notEqual(result.status, 400);
 });
 
+test("an unsatisfiable range is 416 with bytes */total", async () => {
+  const storage = fakeStorage();
+  storage.downloadOriginalStream = async () => ({
+    stream: new ReadableStream<Uint8Array>({
+      start(c) {
+        c.close();
+      },
+    }),
+    contentLength: 0,
+    contentRange: "bytes */3",
+    unsatisfiable: true,
+  });
+  const result = await new TransformService(storage, fakeQueue()).transform({
+    path: "/t/docs/obsidian-vault.zip",
+    userAgent: "",
+    context: {} as any,
+    range: "bytes=100-200",
+  });
+  assert.equal(result.status, 416);
+  assert.equal(result.headers["Content-Range"], "bytes */3");
+});
+
 test("a ranged original is a 206 with Content-Range", async () => {
   const storage = fakeStorage();
   storage.downloadOriginalStream = async (_path: string, range?: string) => {

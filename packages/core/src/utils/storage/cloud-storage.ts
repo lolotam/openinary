@@ -334,6 +334,7 @@ export class CloudStorage implements StatsBackend {
     contentType?: string;
     contentRange?: string;
     totalSize?: number;
+    unsatisfiable?: boolean;
   }> {
     const storageKey = `public/${originalPath}`;
     return await this.s3Client.downloadObjectStream(storageKey, range);

@@ -14,7 +14,8 @@ import { StorageConfig, StorageClientOptions } from "./types";
 import {
   formatBytesRange,
   formatContentRange,
-  parseRangeHeader,
+  formatUnsatisfiableRange,
+  parseRangeRequest,
 } from "../http-range";
 
 export class S3ClientWrapper {
@@ -123,13 +124,12 @@ export class S3ClientWrapper {
     contentType?: string;
     contentRange?: string;
     totalSize?: number;
+    unsatisfiable?: boolean;
   }> {
     let objectRange: string | undefined;
     let totalSize: number | undefined;
-    let parsed:
-      | { offset: number; length: number }
-      | null
-      | undefined;
+    let parsed: { offset: number; length: number } | undefined;
+    let unsatisfiable = false;
 
     if (range) {
       const head = await this.s3Client.send(
@@ -140,9 +140,28 @@ export class S3ClientWrapper {
       );
       totalSize = head.ContentLength;
       if (typeof totalSize === "number") {
-        parsed = parseRangeHeader(range, totalSize);
-        if (parsed) objectRange = formatBytesRange(parsed);
+        const classified = parseRangeRequest(range, totalSize);
+        if (classified.status === "ok") {
+          parsed = { offset: classified.offset, length: classified.length };
+          objectRange = formatBytesRange(parsed);
+        } else if (classified.status === "unsatisfiable") {
+          unsatisfiable = true;
+        }
       }
+    }
+
+    if (unsatisfiable && typeof totalSize === "number") {
+      return {
+        stream: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        contentLength: 0,
+        contentRange: formatUnsatisfiableRange(totalSize),
+        totalSize,
+        unsatisfiable: true,
+      };
     }
 
     const response = await this.s3Client.send(

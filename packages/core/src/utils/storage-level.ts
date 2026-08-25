@@ -8,6 +8,8 @@ export const IMAGE_EXTENSIONS = [
   ".gif",
   ".avif",
   ".psd",
+  ".heic",
+  ".heif",
 ];
 
 export const VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm"];

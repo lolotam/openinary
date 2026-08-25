@@ -52,7 +52,7 @@ export { createInvalidateRoute } from "./routes/invalidate";
 export { getUniqueFilePath } from "./utils/get-unique-file-path";
 export { getCachePath } from "./utils/cache";
 export { parseParams } from "./utils/parser";
-export { parseRangeHeader } from "./utils/http-range";
+export { parseRangeHeader, parseRangeRequest } from "./utils/http-range";
 export { validateApiSecret } from "./utils/signature";
 export { generateUploadSignature, verifyUploadSignature } from "./utils/upload-signature";
 export {

@@ -4,6 +4,7 @@ import {
   formatBytesRange,
   formatContentRange,
   parseRangeHeader,
+  parseRangeRequest,
 } from "./http-range";
 
 test("parses a closed range", () => {
@@ -48,6 +49,13 @@ test("returns null for missing, malformed or unsatisfiable ranges", () => {
   assert.equal(parseRangeHeader("items=0-10", 100), null);
   assert.equal(parseRangeHeader("bytes=50-10", 100), null);
   assert.equal(parseRangeHeader("bytes=100-200", 100), null);
+});
+
+test("classifies unsatisfiable ranges separately from malformed ones", () => {
+  assert.equal(parseRangeRequest(null, 100).status, "absent");
+  assert.equal(parseRangeRequest("bytes=0-10,20-30", 100).status, "absent");
+  assert.equal(parseRangeRequest("bytes=100-200", 100).status, "unsatisfiable");
+  assert.equal(parseRangeRequest("bytes=50-10", 100).status, "unsatisfiable");
 });
 
 test("formats Content-Range and the S3 Range value", () => {

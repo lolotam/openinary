@@ -10,6 +10,8 @@ import {
 
 test('getMediaType recognizes image, video and other extensions', () => {
   assert.equal(getMediaType('a.PNG'), 'image');
+  assert.equal(getMediaType('shot.heic'), 'image');
+  assert.equal(getMediaType('shot.heif'), 'image');
   assert.equal(getMediaType('b.webm'), 'video');
   assert.equal(getMediaType('c.txt'), 'raw');
   assert.equal(getMediaType('vault.zip'), 'raw');

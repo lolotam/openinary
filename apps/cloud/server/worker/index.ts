@@ -819,7 +819,14 @@ async function handleCdnRequest(
   // rejects them - stored-XSS vector) but some are still in R2. Whatever
   // path produced the response, never let one render inline on the CDN
   // origin: octet-stream + attachment neutralizes the script context.
-  const ext = url.pathname.split(".").pop()?.toLowerCase();
+  const extSource = delivery.path || url.pathname;
+  let lastSegment = extSource.split("/").filter(Boolean).pop() || "";
+  try {
+    lastSegment = decodeURIComponent(lastSegment);
+  } catch {
+    // keep the raw segment if it is not valid percent-encoding
+  }
+  const ext = lastSegment.split(".").pop()?.toLowerCase();
   const isSvg = ext === "svg";
   const isHtml = ext === "html" || ext === "htm";
   const isXml = ext === "xml";

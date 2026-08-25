@@ -70,6 +70,10 @@ export function createDownloadRoute(deps: RouteDeps) {
         "Content-Disposition",
         `attachment; filename="${encodeURIComponent(filename)}"`,
       );
+      c.header("X-Content-Type-Options", "nosniff");
+      if (ext === "html" || ext === "htm" || ext === "xml") {
+        c.header("Content-Security-Policy", "sandbox; default-src 'none'");
+      }
       c.header("Content-Length", buffer.length.toString());
       c.header("Cache-Control", "private, no-store");
       return c.body(new Uint8Array(buffer));

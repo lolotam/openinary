@@ -26,7 +26,11 @@ import {
   dispositionForExt,
   isTransformableImageExt,
 } from "../utils/upload-validation";
-import { formatContentRange, parseRangeHeader } from "../utils/http-range";
+import {
+  formatContentRange,
+  formatUnsatisfiableRange,
+  parseRangeRequest,
+} from "../utils/http-range";
 import { normalizeLevelPath } from "../utils/storage-level";
 
 const isVideo = (ext: string | undefined): ext is string =>
@@ -680,8 +684,13 @@ export class TransformService {
       if (sourceUrl) {
         // Passed straight through rather than staged to disk - this route
         // hands back the untouched original, so there is nothing to process.
+        // Multi-range headers are not forwarded: a compliant source can answer
+        // multipart/byteranges 206 with no top-level Content-Range, which we
+        // would then emit as 200 with the original content-type.
+        const singleRange =
+          rangeHeader && !rangeHeader.includes(",") ? rangeHeader : undefined;
         const response = await fetch(sourceUrl, {
-          headers: rangeHeader ? { Range: rangeHeader } : undefined,
+          headers: singleRange ? { Range: singleRange } : undefined,
         });
         if (!response.ok || !response.body) {
           throw new Error(`Source URL answered ${response.status}`);
@@ -699,10 +708,13 @@ export class TransformService {
           filePath,
           rangeHeader ?? undefined,
         );
-        if (original.contentLength) {
+        if (original.contentLength !== undefined) {
           headers["Content-Length"] = original.contentLength.toString();
         }
-        if (original.contentRange) {
+        if (original.unsatisfiable) {
+          if (original.contentRange) headers["Content-Range"] = original.contentRange;
+          status = 416;
+        } else if (original.contentRange) {
           headers["Content-Range"] = original.contentRange;
           status = 206;
         }
@@ -712,8 +724,17 @@ export class TransformService {
         const { stat } = await import("fs/promises");
         const { Readable } = await import("stream");
         const stats = await stat(localPath);
-        const range = parseRangeHeader(rangeHeader, stats.size);
-        if (range) {
+        const range = parseRangeRequest(rangeHeader, stats.size);
+        if (range.status === "unsatisfiable") {
+          headers["Content-Length"] = "0";
+          headers["Content-Range"] = formatUnsatisfiableRange(stats.size);
+          status = 416;
+          stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.close();
+            },
+          });
+        } else if (range.status === "ok") {
           headers["Content-Length"] = range.length.toString();
           headers["Content-Range"] = formatContentRange(range, stats.size);
           status = 206;

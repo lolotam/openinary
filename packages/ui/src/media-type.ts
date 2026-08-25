@@ -1,6 +1,16 @@
 import type { MediaType } from "./types";
 
-const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".psd"];
+const IMAGE_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".gif",
+  ".avif",
+  ".psd",
+  ".heic",
+  ".heif",
+];
 const VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm"];
 const RAW_EXTENSIONS = [
   ".wav",

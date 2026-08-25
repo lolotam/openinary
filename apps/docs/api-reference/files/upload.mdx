@@ -27,7 +27,7 @@ curl -X POST http://localhost:3000/upload \
 | `names`           | `string[]` | Custom filenames, in the same order as `files`. Must include the extension. Defaults to the original filename      |
 | `transformations` | `string[]` | Transformation segments to prewarm immediately after upload (`w_800,h_600,c_fill`), up to 20 variants. Self-hosted only: Cloud ignores this field and generates variants on first request |
 
-**Allowed types:** JPEG, PNG, WebP, AVIF, GIF, HEIC/HEIF, PSD, MP4, MOV, WebM, WAV, MP3, OGG, GLB, glTF, ZIP, TAR, GZ, 7Z, RAR, HTML, JSON, XML, CSV, TXT, MD, PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX
+**Allowed types:** JPEG, PNG, WebP, AVIF, GIF, HEIC/HEIF, PSD, MP4, MOV, WebM, WAV, MP3, OGG, GLB, glTF, ZIP, TAR, GZ, 7Z, RAR, HTML, HTM, JSON, XML, CSV, TXT, MD, PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX
 
 **Max size per file:** configurable via `MAX_FILE_SIZE_MB`, default 50 MB
 

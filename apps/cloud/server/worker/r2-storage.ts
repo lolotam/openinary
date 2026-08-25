@@ -26,6 +26,8 @@ const IMAGE_EXTENSIONS = [
   ".gif",
   ".avif",
   ".psd",
+  ".heic",
+  ".heif",
 ];
 const VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm"];
 const RAW_EXTENSIONS = [

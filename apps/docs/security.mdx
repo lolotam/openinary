@@ -63,6 +63,14 @@ That pairing is what closes the stored-XSS path on the public `/t/*` route, whic
 returns uploaded bytes untouched. Both halves are load-bearing: strict at the
 door, no sniffing on the way out.
 
+HTML and HTM are accepted as stored documents (for vaults, email templates, and
+similar) but are never executed on the Openinary origin. Fullstack Docker serves
+the dashboard and `/t/*` from the same host, and presigned uploads are untrusted,
+so an inline `text/html` response would be stored XSS. Delivery uses
+`Content-Disposition: attachment`, `Content-Security-Policy: sandbox; default-src 'none'`,
+and `X-Content-Type-Options: nosniff`. SVG remains rejected at upload. PDF may
+render inline.
+
 ## Docker security
 
 The two images differ here, and the difference matters when you pick one.

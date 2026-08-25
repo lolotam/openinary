@@ -1,5 +1,6 @@
 "use client";
 
+import { File } from "lucide-react";
 import { VideoThumbnail } from "../components/video-thumbnail";
 import type { MediaFile } from "../types";
 
@@ -13,6 +14,11 @@ export function AssetPreview({ asset, previewUrl }: AssetPreviewProps) {
     <div className="space-y-2">
       <h3 className="text-sm font-semibold">Preview</h3>
       <div className="relative aspect-square rounded-lg overflow-hidden border border-border bg-muted">
+        {asset.type === "raw" || !previewUrl ? (
+          <div className="flex h-full w-full items-center justify-center">
+            <File className="h-1/3 w-1/3 text-muted-foreground" strokeWidth={1.5} />
+          </div>
+        ) : null}
         {/*
           Both media types go through the same component, which owns the
           skeleton, the fade and the retry.
@@ -25,6 +31,7 @@ export function AssetPreview({ asset, previewUrl }: AssetPreviewProps) {
           later attempt and painted underneath "Failed to load preview", and
           reselecting the asset brought the message straight back.
         */}
+        {asset.type !== "raw" && previewUrl ? (
         <VideoThumbnail
           src={previewUrl}
           alt={asset.name}
@@ -32,6 +39,7 @@ export function AssetPreview({ asset, previewUrl }: AssetPreviewProps) {
           loading="eager"
           errorLabel="Failed to load preview"
         />
+        ) : null}
       </div>
     </div>
   );

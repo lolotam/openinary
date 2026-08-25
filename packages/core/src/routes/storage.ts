@@ -118,7 +118,7 @@ export function createStorageRoute(deps: RouteDeps) {
       if (previewItems.length >= FOLDER_PREVIEW_LIMIT) break;
       if (!entry.isFile()) continue;
       const type = getMediaType(entry.name);
-      if (type) {
+      if (type === "image" || type === "video") {
         previewItems.push({ path: `${relPath}/${entry.name}`, type });
       }
     }

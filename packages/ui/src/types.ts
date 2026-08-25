@@ -1,4 +1,4 @@
-export type MediaType = "image" | "video";
+export type MediaType = "image" | "video" | "raw";
 
 export type MediaFile = {
   id: string;

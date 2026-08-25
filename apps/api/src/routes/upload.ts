@@ -427,7 +427,18 @@ export function createUploadRoute(deps: RouteDeps) {
         if (filename === ".DS_Store") {
           continue;
         }
-        const mimeType = file.type;
+        // Hidden dotfiles (`.env`, `.htaccess`, `folder/.secret.zip`) must
+        // not enter storage. `.DS_Store` is skipped above rather than failed.
+        if (
+          rawSanitizedPath.split("/").some((segment) => segment.startsWith("."))
+        ) {
+          failedUploads.push({
+            filename: rawSanitizedPath,
+            error: "Invalid file path",
+          });
+          continue;
+        }
+        const mimeType = file.type || "";
         const fileSize = file.size;
 
         // Validate file size

@@ -61,6 +61,83 @@ test("a transformed response is served with nosniff too", async () => {
   assert.equal(headers.get("x-content-type-options"), "nosniff");
 });
 
+test("a streamed zip is labelled application/zip with attachment", async () => {
+  const headers = await headersFor(
+    {
+      stream: new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new Uint8Array([0x50, 0x4b]));
+          c.close();
+        },
+      }),
+      contentType: "application/zip",
+      headers: {
+        "Content-Disposition": 'attachment; filename="obsidian-vault.zip"',
+        "Accept-Ranges": "bytes",
+      },
+    },
+    "/t/docs/obsidian-vault.zip",
+  );
+
+  assert.equal(headers.get("x-content-type-options"), "nosniff");
+  assert.equal(headers.get("content-type"), "application/zip");
+  assert.equal(
+    headers.get("content-disposition"),
+    'attachment; filename="obsidian-vault.zip"',
+  );
+  assert.equal(headers.get("accept-ranges"), "bytes");
+});
+
+test("html originals are attachment + nosniff + csp sandbox", async () => {
+  const headers = await headersFor(
+    {
+      stream: new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new Uint8Array([0x3c]));
+          c.close();
+        },
+      }),
+      contentType: "text/html; charset=utf-8",
+      headers: {
+        "Content-Disposition": 'attachment; filename="index.html"',
+        "Content-Security-Policy": "sandbox; default-src 'none'",
+      },
+    },
+    "/t/pages/index.html",
+  );
+
+  assert.equal(headers.get("x-content-type-options"), "nosniff");
+  assert.equal(headers.get("content-type"), "text/html; charset=utf-8");
+  assert.equal(
+    headers.get("content-disposition"),
+    'attachment; filename="index.html"',
+  );
+  assert.equal(
+    headers.get("content-security-policy"),
+    "sandbox; default-src 'none'",
+  );
+});
+
+test("pdf originals are inline", async () => {
+  const headers = await headersFor(
+    {
+      stream: new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new Uint8Array([0x25]));
+          c.close();
+        },
+      }),
+      contentType: "application/pdf",
+      headers: { "Content-Disposition": "inline" },
+    },
+    "/t/docs/manual.pdf",
+  );
+
+  assert.equal(headers.get("content-type"), "application/pdf");
+  assert.equal(headers.get("content-disposition"), "inline");
+  assert.equal(headers.get("x-content-type-options"), "nosniff");
+});
+
 test("the content-type fallback uses the shared media table", async () => {
   // No contentType from the service: the route fills it in. It has to reach the
   // same table upload validation uses, or a stored .glb gets labelled as

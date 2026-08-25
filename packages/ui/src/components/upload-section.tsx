@@ -8,9 +8,9 @@ import { invalidateStorage } from "../hooks/use-storage-tree";
 import { toast } from "sonner";
 import {
   CheckCircle2,
+  File,
   FileImage,
   FileVideo,
-  Folder,
   FolderOpen,
   Upload,
   XCircle,
@@ -150,7 +150,7 @@ export function UploadSection({ uploadToFolder }: { uploadToFolder?: string }) {
         <FileVideo className="h-4 w-4 text-purple-500 dark:text-purple-400" />
       );
     }
-    return <Folder className="h-4 w-4 text-muted-foreground" />;
+    return <File className="h-4 w-4 text-muted-foreground" />;
   };
 
   return (

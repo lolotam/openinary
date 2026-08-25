@@ -11,6 +11,11 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import https from "https";
 import { StorageConfig, StorageClientOptions } from "./types";
+import {
+  formatBytesRange,
+  formatContentRange,
+  parseRangeHeader,
+} from "../http-range";
 
 export class S3ClientWrapper {
   private s3Client: S3Client;
@@ -106,16 +111,45 @@ export class S3ClientWrapper {
   /**
    * Downloads an object as a stream, without buffering it in memory.
    * Used to serve large files (e.g. original videos) directly to clients.
+   * `range` is the raw HTTP Range header (e.g. "bytes=0-1023"); invalid or
+   * unsatisfiable values are ignored and the whole object is returned.
    */
-  async downloadObjectStream(key: string): Promise<{
+  async downloadObjectStream(
+    key: string,
+    range?: string,
+  ): Promise<{
     stream: ReadableStream<Uint8Array>;
     contentLength?: number;
     contentType?: string;
+    contentRange?: string;
+    totalSize?: number;
   }> {
+    let objectRange: string | undefined;
+    let totalSize: number | undefined;
+    let parsed:
+      | { offset: number; length: number }
+      | null
+      | undefined;
+
+    if (range) {
+      const head = await this.s3Client.send(
+        new HeadObjectCommand({
+          Bucket: this.config.bucketName,
+          Key: key,
+        }),
+      );
+      totalSize = head.ContentLength;
+      if (typeof totalSize === "number") {
+        parsed = parseRangeHeader(range, totalSize);
+        if (parsed) objectRange = formatBytesRange(parsed);
+      }
+    }
+
     const response = await this.s3Client.send(
       new GetObjectCommand({
         Bucket: this.config.bucketName,
         Key: key,
+        ...(objectRange ? { Range: objectRange } : {}),
       }),
     );
 
@@ -125,8 +159,13 @@ export class S3ClientWrapper {
 
     return {
       stream: response.Body.transformToWebStream() as ReadableStream<Uint8Array>,
-      contentLength: response.ContentLength,
+      contentLength: parsed?.length ?? response.ContentLength,
       contentType: response.ContentType,
+      contentRange:
+        parsed && typeof totalSize === "number"
+          ? formatContentRange(parsed, totalSize)
+          : undefined,
+      totalSize,
     };
   }
 

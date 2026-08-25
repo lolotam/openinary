@@ -1,5 +1,11 @@
 # @openinary/core
 
+## Unreleased
+
+### Minor Changes
+
+- Raw and document assets: archives (`zip`, `tar`, `gz`, `7z`, `rar`), web/data (`html`, `htm`, `json`, `xml`, `csv`, `txt`, `md`), and documents (`pdf`, `doc`, `docx`, `xls`, `xlsx`, `ppt`, `pptx`) upload through the existing media-type table, skip Sharp/FFmpeg, and stream as originals on `/t/<path>` and `/raw/<path>`. Transform params on a raw type still 400. Originals support HTTP Range (206), `Accept-Ranges`, and a Content-Disposition that downloads archives/office/HTML and inlines PDF. HTML is never executed on the Openinary origin (attachment + CSP sandbox). Empty browser MIME is accepted when the extension is known.
+
 ## 1.6.0
 
 ### Minor Changes

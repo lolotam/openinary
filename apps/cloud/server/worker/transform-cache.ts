@@ -445,27 +445,82 @@ export const ALLOWED_UPLOAD_TYPES: Readonly<Record<string, readonly string[]>> =
     "image/heic": [".heic", ".heif"],
     "image/heif": [".heic", ".heif"],
     "image/vnd.adobe.photoshop": [".psd"],
-    "application/octet-stream": [".psd", ".glb", ".gltf"],
+    "application/octet-stream": [
+      ".psd",
+      ".glb",
+      ".gltf",
+      ".zip",
+      ".tar",
+      ".gz",
+      ".7z",
+      ".rar",
+      ".pdf",
+      ".doc",
+      ".docx",
+      ".xls",
+      ".xlsx",
+      ".ppt",
+      ".pptx",
+    ],
     // Videos
     "video/mp4": [".mp4"],
     "video/quicktime": [".mov"],
     "video/webm": [".webm"],
     // Audio
-    "audio/mpeg": [".mp3"],
     "audio/wav": [".wav"],
     "audio/x-wav": [".wav"],
+    "audio/mpeg": [".mp3"],
     "audio/ogg": [".ogg"],
     "application/ogg": [".ogg"],
     // 3D
     "model/gltf-binary": [".glb"],
     "model/gltf+json": [".gltf"],
+    // Archives
+    "application/zip": [".zip"],
+    "application/x-zip-compressed": [".zip"],
+    "application/x-zip": [".zip"],
+    "application/x-tar": [".tar"],
+    "application/gzip": [".gz"],
+    "application/x-gzip": [".gz"],
+    "application/x-7z-compressed": [".7z"],
+    "application/vnd.rar": [".rar"],
+    "application/x-rar-compressed": [".rar"],
+    // Web & data
+    "text/html": [".html", ".htm"],
+    "application/json": [".json"],
+    "application/xml": [".xml"],
+    "text/xml": [".xml"],
+    "text/csv": [".csv"],
+    "text/plain": [".csv", ".txt", ".md"],
+    "text/markdown": [".md"],
+    // Documents
+    "application/pdf": [".pdf"],
+    "application/msword": [".doc"],
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
+      ".docx",
+    ],
+    "application/vnd.ms-excel": [".xls"],
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [
+      ".xlsx",
+    ],
+    "application/vnd.ms-powerpoint": [".ppt"],
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": [
+      ".pptx",
+    ],
   };
 
 export function validateUploadFileType(
   filename: string,
   mimeType: string,
 ): boolean {
+  const ext = posix.extname(filename).toLowerCase();
+  if (!ext) return false;
+  if (!mimeType) {
+    return Object.values(ALLOWED_UPLOAD_TYPES).some((exts) =>
+      exts.includes(ext),
+    );
+  }
   const allowedExtensions = ALLOWED_UPLOAD_TYPES[mimeType];
   if (!allowedExtensions) return false;
-  return allowedExtensions.includes(posix.extname(filename).toLowerCase());
+  return allowedExtensions.includes(ext);
 }

@@ -22,9 +22,51 @@ import {
   contentTypeForFormat,
   determineOutputFormat,
 } from "../utils/video/format";
+import {
+  dispositionForExt,
+  isTransformableImageExt,
+} from "../utils/upload-validation";
+import { formatContentRange, parseRangeHeader } from "../utils/http-range";
+import { normalizeLevelPath } from "../utils/storage-level";
 
 const isVideo = (ext: string | undefined): ext is string =>
   !!ext && VIDEO_FORMATS.has(ext);
+
+function headerOf(request: TransformRequest, name: string): string | undefined {
+  try {
+    return request.context?.req?.header(name) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function queryOf(request: TransformRequest, name: string): string | undefined {
+  try {
+    return request.context?.req?.query(name) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Reject `.` / `..` / empty segments so a `%2e%2e` path cannot escape
+ * `./public` on the local-FS branch. `path.normalize` would resolve the
+ * traversal; this refuses it instead.
+ */
+function assertSafeStoragePath(filePath: string): string {
+  const normalised = filePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  const dir = normalised.includes("/")
+    ? normalised.slice(0, normalised.lastIndexOf("/"))
+    : "";
+  const base = normalised.includes("/")
+    ? normalised.slice(normalised.lastIndexOf("/") + 1)
+    : normalised;
+  const safeDir = normalizeLevelPath(dir);
+  if (safeDir === null || !base || base === "." || base === "..") {
+    throw new Error("Invalid file path");
+  }
+  return safeDir ? `${safeDir}/${base}` : base;
+}
 
 // Types for the service
 export interface TransformRequest {
@@ -39,6 +81,15 @@ export interface TransformRequest {
    * nothing else: the cache, on both sides, stays this instance's own.
    */
   sourceUrl?: string;
+  /** Raw HTTP Range header. Taken from context when omitted. */
+  range?: string | null;
+  /** Force Content-Disposition: attachment (`?dl=1` / `?download=1`). */
+  forceDownload?: boolean;
+  /**
+   * Skip auto-format injection and never transform. Used by /raw/* so a
+   * JPEG is streamed as the stored original, not re-encoded as avif/webp.
+   */
+  originalsOnly?: boolean;
 }
 
 export interface TransformResult {
@@ -76,6 +127,11 @@ export class TransformService {
    */
   async transform(request: TransformRequest): Promise<TransformResult> {
     const { path, userAgent, acceptHeader, sourceUrl } = request;
+    const range = request.range ?? headerOf(request, "Range");
+    const forceDownload =
+      request.forceDownload === true ||
+      queryOf(request, "dl") === "1" ||
+      queryOf(request, "download") === "1";
 
     try {
       // Parse path and parameters
@@ -85,7 +141,7 @@ export class TransformService {
       // Determine file path segments
       const hasTransform = this.hasTransformSegment(segments);
       const fileSegments = hasTransform ? segments.slice(1) : segments;
-      const filePath = fileSegments.join("/");
+      const filePath = assertSafeStoragePath(fileSegments.join("/"));
       const localPath = `./public/${filePath}`;
       const ext = filePath.split(".").pop()?.toLowerCase();
 
@@ -96,6 +152,7 @@ export class TransformService {
           params,
           userAgent,
           acceptHeader,
+          request.originalsOnly === true,
         );
 
       // Verify original file exists
@@ -120,6 +177,8 @@ export class TransformService {
           localPath,
           ext ?? "",
           sourceUrl,
+          range,
+          forceDownload,
         );
       }
 
@@ -181,13 +240,18 @@ export class TransformService {
     params: any,
     userAgent?: string,
     acceptHeader?: string,
+    originalsOnly = false,
   ): Promise<{ effectiveParams: any; cachePath: string }> {
+    if (originalsOnly) {
+      return { effectiveParams: {}, cachePath: getCachePath(path) };
+    }
+
     const ext = path.split(".").pop()?.toLowerCase();
     let effectiveParams = { ...params };
     let cachePath = getCachePath(path);
 
     // Determine optimal format if not explicitly specified
-    if (!params.format && ext?.match(/jpe?g|png|webp|avif|gif|psd/)) {
+    if (!params.format && isTransformableImageExt(ext)) {
       const optimalFormat = this.compression.determineOptimalFormatForCache(
         userAgent,
         acceptHeader,
@@ -313,7 +377,7 @@ export class TransformService {
       );
     }
 
-    const isTransformableImage = !!ext?.match(/jpe?g|png|webp|avif|gif|psd/);
+    const isTransformableImage = isTransformableImageExt(ext);
 
     // Reached only when effectiveParams is non-empty - the bare-URL case
     // short-circuits to streamOriginal above. A transform was requested on a
@@ -580,42 +644,67 @@ export class TransformService {
    * Stream the untouched original without buffering it in memory: originals can
    * weigh hundreds of MB and buffering both delays the first byte and pressures
    * the container memory while ffmpeg jobs are running. Serves any stored type
-   * (video, audio, 3D, image) with its real content-type.
+   * (video, audio, 3D, image, raw document) with its real content-type.
    */
   private async streamOriginal(
     filePath: string,
     localPath: string,
     ext: string,
     sourceUrl?: string,
+    rangeHeader?: string | null,
+    forceDownload = false,
   ): Promise<TransformResult> {
     // encodeURIComponent keeps ETag ASCII-only: HTTP header values must be a
     // ByteString, and raw file paths can contain non-ASCII or NFD-decomposed
     // accented characters (e.g. a combining accent has a code point > 255)
+    const filename = filePath.split("/").pop() || filePath;
     const headers: Record<string, string> = {
       "Cache-Control": "public, max-age=31536000, must-revalidate",
       ETag: `"${encodeURIComponent(filePath)}-original"`,
+      "Accept-Ranges": "bytes",
+      "Content-Disposition": dispositionForExt(ext, filename, forceDownload),
+      "Access-Control-Expose-Headers":
+        "Content-Length, Content-Range, Accept-Ranges",
     };
     if (isVideo(ext)) {
       headers["X-Video-Status"] = "original";
     }
+    if (ext === "html" || ext === "htm" || ext === "xml") {
+      headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
+    }
 
     try {
       let stream: ReadableStream<Uint8Array>;
+      let status: number | undefined;
 
       if (sourceUrl) {
         // Passed straight through rather than staged to disk - this route
         // hands back the untouched original, so there is nothing to process.
-        const response = await fetch(sourceUrl);
+        const response = await fetch(sourceUrl, {
+          headers: rangeHeader ? { Range: rangeHeader } : undefined,
+        });
         if (!response.ok || !response.body) {
           throw new Error(`Source URL answered ${response.status}`);
         }
         const length = response.headers.get("content-length");
         if (length) headers["Content-Length"] = length;
+        const contentRange = response.headers.get("content-range");
+        if (response.status === 206 && contentRange) {
+          headers["Content-Range"] = contentRange;
+          status = 206;
+        }
         stream = response.body;
       } else if (this.storage) {
-        const original = await this.storage.downloadOriginalStream(filePath);
+        const original = await this.storage.downloadOriginalStream(
+          filePath,
+          rangeHeader ?? undefined,
+        );
         if (original.contentLength) {
           headers["Content-Length"] = original.contentLength.toString();
+        }
+        if (original.contentRange) {
+          headers["Content-Range"] = original.contentRange;
+          status = 206;
         }
         stream = original.stream;
       } else {
@@ -623,13 +712,31 @@ export class TransformService {
         const { stat } = await import("fs/promises");
         const { Readable } = await import("stream");
         const stats = await stat(localPath);
-        headers["Content-Length"] = stats.size.toString();
-        stream = Readable.toWeb(
-          createReadStream(localPath),
-        ) as ReadableStream<Uint8Array>;
+        const range = parseRangeHeader(rangeHeader, stats.size);
+        if (range) {
+          headers["Content-Length"] = range.length.toString();
+          headers["Content-Range"] = formatContentRange(range, stats.size);
+          status = 206;
+          stream = Readable.toWeb(
+            createReadStream(localPath, {
+              start: range.offset,
+              end: range.offset + range.length - 1,
+            }),
+          ) as ReadableStream<Uint8Array>;
+        } else {
+          headers["Content-Length"] = stats.size.toString();
+          stream = Readable.toWeb(
+            createReadStream(localPath),
+          ) as ReadableStream<Uint8Array>;
+        }
       }
 
-      return { stream, contentType: contentTypeForFormat(ext), headers };
+      return {
+        stream,
+        contentType: contentTypeForFormat(ext),
+        headers,
+        status,
+      };
     } catch (error) {
       logger.error(
         { error: serializeError(error), filePath },
@@ -661,6 +768,14 @@ export class TransformService {
     request: TransformRequest,
   ): Promise<TransformResult> {
     const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage === "Invalid file path") {
+      return {
+        buffer: Buffer.from("Invalid file path"),
+        contentType: "text/plain",
+        status: 400,
+        headers: { "Cache-Control": "no-store" },
+      };
+    }
     logger.error(
       {
         error: serializeError(error),

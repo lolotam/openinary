@@ -28,6 +28,32 @@ const IMAGE_EXTENSIONS = [
   ".psd",
 ];
 const VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm"];
+const RAW_EXTENSIONS = [
+  ".wav",
+  ".mp3",
+  ".ogg",
+  ".glb",
+  ".gltf",
+  ".zip",
+  ".tar",
+  ".gz",
+  ".7z",
+  ".rar",
+  ".html",
+  ".htm",
+  ".json",
+  ".xml",
+  ".csv",
+  ".txt",
+  ".md",
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".ppt",
+  ".pptx",
+];
 const FOLDER_SUMMARY_MAX_KEYS = 100;
 const FOLDER_PREVIEW_LIMIT = 4;
 
@@ -38,7 +64,7 @@ export type FileEntry = {
   mtime?: string;
 };
 export type Level = { folderNames: string[]; files: FileEntry[] };
-export type FolderSummaryItem = { path: string; type: "image" | "video" };
+export type FolderSummaryItem = { path: string; type: "image" | "video" | "raw" };
 export type FolderSummary = {
   itemCount: number;
   truncated: boolean;
@@ -50,10 +76,11 @@ export type OriginalMetadata = {
   updatedAt: string;
 };
 
-function getMediaType(name: string): "image" | "video" | null {
+function getMediaType(name: string): "image" | "video" | "raw" | null {
   const lower = name.toLowerCase();
   if (IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext))) return "image";
   if (VIDEO_EXTENSIONS.some((ext) => lower.endsWith(ext))) return "video";
+  if (RAW_EXTENSIONS.some((ext) => lower.endsWith(ext))) return "raw";
   return null;
 }
 
@@ -165,7 +192,7 @@ export async function folderSummary(
     if (previewItems.length >= FOLDER_PREVIEW_LIMIT) break;
     const name = obj.key.slice(storagePrefix.length);
     const type = getMediaType(name);
-    if (type)
+    if (type === "image" || type === "video")
       previewItems.push({
         path: folderPath ? `${folderPath}/${name}` : name,
         type,

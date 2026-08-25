@@ -3,6 +3,7 @@ import type { RouteDeps } from "../config/deps";
 import fs from "fs";
 import path from "path";
 import logger, { serializeError } from "../utils/logger";
+import { contentTypeForExt } from "../utils/upload-validation";
 
 export function createDownloadRoute(deps: RouteDeps) {
   const { storage } = deps;
@@ -60,21 +61,9 @@ export function createDownloadRoute(deps: RouteDeps) {
         buffer = fs.readFileSync(localPath);
       }
 
-      // Derive a safe Content-Type from the extension
+      // Derive a safe Content-Type from the shared media-type table
       const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-      const contentTypeMap: Record<string, string> = {
-        jpg: "image/jpeg",
-        jpeg: "image/jpeg",
-        png: "image/png",
-        webp: "image/webp",
-        avif: "image/avif",
-        gif: "image/gif",
-        psd: "image/vnd.adobe.photoshop",
-        mp4: "video/mp4",
-        mov: "video/quicktime",
-        webm: "video/webm",
-      };
-      const contentType = contentTypeMap[ext] ?? "application/octet-stream";
+      const contentType = contentTypeForExt(ext);
 
       c.header("Content-Type", contentType);
       c.header(

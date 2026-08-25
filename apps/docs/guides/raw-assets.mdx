@@ -1,0 +1,70 @@
+---
+title: "Raw and document assets"
+description: "Upload and deliver archives, HTML, PDF, office documents, and data files without running them through the image or video pipelines."
+---
+
+Openinary stores more than images and video. Archives, HTML, PDFs, spreadsheets, and JSON are first-class assets: they upload through `POST /upload`, live in the same folder tree, and are delivered as the original bytes.
+
+They are **not** transformed. Sharp and FFmpeg never see them.
+
+## Upload
+
+The same `POST /upload` endpoint accepts these types alongside media. Folder prefixes, collision uniquify (`photo (1).zip`), and API-key / presigned auth are unchanged.
+
+```bash
+curl -X POST http://localhost:3000/upload \
+  -H "Authorization: Bearer <api_key>" \
+  -F "files=@obsidian-vault.zip" \
+  -F "folder=vaults/2026"
+```
+
+A successful upload returns a `/t/` delivery URL:
+
+```json
+{
+  "success": true,
+  "files": [
+    {
+      "filename": "obsidian-vault.zip",
+      "path": "vaults/2026/obsidian-vault.zip",
+      "size": 1048576,
+      "url": "/t/vaults/2026/obsidian-vault.zip"
+    }
+  ]
+}
+```
+
+Content is still checked, not just the extension. A `.zip` must start with a ZIP local-file header; a `.pdf` must start with `%PDF`; a `.html` must start with markup. A PE binary renamed to `.txt` is rejected.
+
+Hidden dotfiles (`.env`, `.htaccess`, `.secret.zip`) are rejected. `.DS_Store` is skipped silently.
+
+## Delivery
+
+| URL | Behaviour |
+| --- | --- |
+| `/t/vaults/2026/obsidian-vault.zip` | Streams the original with `Content-Type: application/zip` |
+| `/raw/vaults/2026/obsidian-vault.zip` | Same bytes, original-only alias |
+| `/t/w_500/vaults/2026/obsidian-vault.zip` | `400` — raw types cannot be transformed |
+| `/raw/w_500/vaults/2026/obsidian-vault.zip` | `400` — `/raw/` never applies transformations |
+
+Every original response carries:
+
+- The table Content-Type for that extension (`application/zip`, `application/pdf`, `text/html; charset=utf-8`, …)
+- `X-Content-Type-Options: nosniff`
+- `Accept-Ranges: bytes`
+- `Cache-Control: public, max-age=31536000, must-revalidate`
+- `Content-Disposition`: `attachment` for archives, office documents, and HTML; `inline` for PDF, JSON, text, images, audio, video, 3D
+
+Add `?dl=1` (or `?download=1`) to force a download of any type.
+
+Range requests return `206 Partial Content` with `Content-Range`, so large zips and videos download and seek without buffering the whole file.
+
+## HTML is stored, not executed
+
+HTML (and XML) are document assets, not a static-site host. `/t/page.html` is served as `text/html` with `Content-Disposition: attachment` and `Content-Security-Policy: sandbox; default-src 'none'`. The browser downloads it instead of running it on the Openinary origin. That is intentional: in fullstack Docker the dashboard and `/t/*` share a host, and a presigned upload of `<script>` would otherwise be stored XSS. SVG remains rejected at upload; an SVG renamed to `.xml` is still forced to download.
+
+To publish HTML as a page, put it on its own origin.
+
+## Dashboard
+
+Raw files show up in the media grid as file-icon tiles (no generated thumbnail). The details sidebar still offers Copy URL and Download. Image and video transformation previews are unchanged.

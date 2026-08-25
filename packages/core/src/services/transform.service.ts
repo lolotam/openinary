@@ -692,17 +692,30 @@ export class TransformService {
         const response = await fetch(sourceUrl, {
           headers: singleRange ? { Range: singleRange } : undefined,
         });
-        if (!response.ok || !response.body) {
-          throw new Error(`Source URL answered ${response.status}`);
+        if (response.status === 416) {
+          headers["Content-Length"] = "0";
+          const contentRange = response.headers.get("content-range");
+          if (contentRange) headers["Content-Range"] = contentRange;
+          status = 416;
+          await response.body?.cancel();
+          stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.close();
+            },
+          });
+        } else {
+          if (!response.ok || !response.body) {
+            throw new Error(`Source URL answered ${response.status}`);
+          }
+          const length = response.headers.get("content-length");
+          if (length) headers["Content-Length"] = length;
+          const contentRange = response.headers.get("content-range");
+          if (response.status === 206 && contentRange) {
+            headers["Content-Range"] = contentRange;
+            status = 206;
+          }
+          stream = response.body;
         }
-        const length = response.headers.get("content-length");
-        if (length) headers["Content-Length"] = length;
-        const contentRange = response.headers.get("content-range");
-        if (response.status === 206 && contentRange) {
-          headers["Content-Range"] = contentRange;
-          status = 206;
-        }
-        stream = response.body;
       } else if (this.storage) {
         const original = await this.storage.downloadOriginalStream(
           filePath,

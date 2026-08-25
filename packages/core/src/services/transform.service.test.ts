@@ -258,6 +258,36 @@ test("originalsOnly streams a jpeg without injecting a format", async () => {
   assert.notEqual(result.status, 400);
 });
 
+test("sourceUrl 416 is forwarded instead of becoming a 500", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: any, init?: any) => {
+    const range = (init?.headers as any)?.Range;
+    if (range === "bytes=0-0") {
+      return new Response(new Uint8Array([0]), {
+        status: 206,
+        headers: { "Content-Range": "bytes 0-0/10" },
+      });
+    }
+    return new Response(null, {
+      status: 416,
+      headers: { "Content-Range": "bytes */10" },
+    });
+  }) as any;
+  try {
+    const result = await new TransformService(fakeStorage(), fakeQueue()).transform({
+      path: "/t/docs/a.zip",
+      userAgent: "",
+      context: {} as any,
+      sourceUrl: "https://example.com/a.zip",
+      range: "bytes=100-200",
+    });
+    assert.equal(result.status, 416);
+    assert.equal(result.headers["Content-Range"], "bytes */10");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("an unsatisfiable range is 416 with bytes */total", async () => {
   const storage = fakeStorage();
   storage.downloadOriginalStream = async () => ({

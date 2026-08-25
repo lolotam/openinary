@@ -303,6 +303,20 @@ async function serveOriginalFallback(
   // out, and answering a range we didn't understand with the complete file is
   // the reading every player recovers from.
   const range = meta ? parseRangeHeader(rangeHeader, meta.size) : null;
+  if (
+    rangeHeader &&
+    meta &&
+    !range &&
+    /^bytes=\d+-\d*$/.test(rangeHeader)
+  ) {
+    const headers = new Headers();
+    headers.set("Accept-Ranges", "bytes");
+    headers.set("Content-Range", `bytes */${meta.size}`);
+    headers.set("Content-Length", "0");
+    headers.set("Cache-Control", cacheControl);
+    headers.set("Access-Control-Allow-Origin", "*");
+    return new Response(null, { status: 416, headers });
+  }
   const object = range
     ? await downloadOriginalRange(
         env.MEDIA_BUCKET,

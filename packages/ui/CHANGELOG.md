@@ -1,5 +1,11 @@
 # @openinary/ui
 
+## Unreleased
+
+### Minor Changes
+
+- Dashboard and FileUploader accept raw/document uploads (zip, html, pdf, office, json, …). The media grid lists them as file-icon tiles instead of requesting a transform thumbnail.
+
 ## 0.8.1
 
 ### Patch Changes

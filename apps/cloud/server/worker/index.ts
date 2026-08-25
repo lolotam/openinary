@@ -74,9 +74,34 @@ const CONTENT_TYPE_BY_EXT: Record<string, string> = {
   webp: "image/webp",
   avif: "image/avif",
   gif: "image/gif",
+  psd: "image/vnd.adobe.photoshop",
   mp4: "video/mp4",
   mov: "video/quicktime",
   webm: "video/webm",
+  wav: "audio/wav",
+  mp3: "audio/mpeg",
+  ogg: "audio/ogg",
+  glb: "model/gltf-binary",
+  gltf: "model/gltf+json",
+  zip: "application/zip",
+  tar: "application/x-tar",
+  gz: "application/gzip",
+  "7z": "application/x-7z-compressed",
+  rar: "application/vnd.rar",
+  html: "text/html; charset=utf-8",
+  htm: "text/html; charset=utf-8",
+  json: "application/json",
+  xml: "application/xml",
+  csv: "text/csv; charset=utf-8",
+  txt: "text/plain; charset=utf-8",
+  md: "text/markdown; charset=utf-8",
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
 
 function extractBucketId(pathname: string): string | null {
@@ -155,6 +180,7 @@ type CdnRequestInfo = {
   ext: string | undefined;
   isImageExt: boolean;
   isVideoExt: boolean;
+  isRawExt: boolean;
   isThumbnailRequest: boolean;
   isDashboardThumb: boolean;
   hasTransform: boolean;
@@ -205,6 +231,7 @@ function parseCdnRequest(url: URL, bucketId: string): CdnRequestInfo | null {
   const ext = relativePath.split(".").pop()?.toLowerCase();
   const isImageExt = !!ext?.match(/jpe?g|png|webp|avif|gif|psd/);
   const isVideoExt = !!ext?.match(/mp4|mov|webm/);
+  const isRawExt = !!ext && !!CONTENT_TYPE_BY_EXT[ext] && !isImageExt && !isVideoExt;
   const params = parseParams(`/t/${afterT}`);
   const isThumbnailRequest =
     params.thumbnail === "true" || params.thumbnail === "1";
@@ -214,6 +241,7 @@ function parseCdnRequest(url: URL, bucketId: string): CdnRequestInfo | null {
     ext,
     isImageExt,
     isVideoExt,
+    isRawExt,
     isThumbnailRequest,
     isDashboardThumb,
     hasTransform,
@@ -275,6 +303,24 @@ async function serveOriginalFallback(
   // out, and answering a range we didn't understand with the complete file is
   // the reading every player recovers from.
   const range = meta ? parseRangeHeader(rangeHeader, meta.size) : null;
+  if (
+    rangeHeader &&
+    meta &&
+    !range &&
+    /^bytes=\d+-\d*$/.test(rangeHeader)
+  ) {
+    const headers = new Headers();
+    headers.set("Accept-Ranges", "bytes");
+    headers.set("Content-Range", `bytes */${meta.size}`);
+    headers.set("Content-Length", "0");
+    headers.set("Cache-Control", cacheControl);
+    headers.set("Access-Control-Allow-Origin", "*");
+    headers.set(
+      "Access-Control-Expose-Headers",
+      "Content-Length, Content-Range, Accept-Ranges",
+    );
+    return new Response(null, { status: 416, headers });
+  }
   const object = range
     ? await downloadOriginalRange(
         env.MEDIA_BUCKET,
@@ -791,14 +837,38 @@ async function handleCdnRequest(
   // rejects them - stored-XSS vector) but some are still in R2. Whatever
   // path produced the response, never let one render inline on the CDN
   // origin: octet-stream + attachment neutralizes the script context.
-  const isSvg = url.pathname.split(".").pop()?.toLowerCase() === "svg";
-  if (!isSvg && response.headers.has("Access-Control-Allow-Origin"))
+  const extSource = delivery.path || url.pathname;
+  let lastSegment = extSource.split("/").filter(Boolean).pop() || "";
+  try {
+    lastSegment = decodeURIComponent(lastSegment);
+  } catch {
+    // keep the raw segment if it is not valid percent-encoding
+  }
+  const ext = lastSegment.split(".").pop()?.toLowerCase();
+  const isSvg = ext === "svg";
+  const isHtml = ext === "html" || ext === "htm";
+  const isXml = ext === "xml";
+  if (
+    !isSvg &&
+    !isHtml &&
+    !isXml &&
+    response.headers.has("Access-Control-Allow-Origin")
+  )
     return response;
   const headers = new Headers(response.headers);
   headers.set("Access-Control-Allow-Origin", "*");
   if (isSvg && response.ok) {
     headers.set("Content-Type", "application/octet-stream");
     headers.set("Content-Disposition", "attachment");
+  }
+  if ((isHtml || isXml) && response.ok) {
+    headers.set(
+      "Content-Type",
+      isXml ? "application/xml" : "text/html; charset=utf-8",
+    );
+    headers.set("Content-Disposition", "attachment");
+    headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
+    headers.set("X-Content-Type-Options", "nosniff");
   }
   return new Response(response.body, { status: response.status, headers });
 }
@@ -938,7 +1008,12 @@ async function serveCdnRequest(
   // /t/comp.psd has always meant the png core decodes it into, and heic is
   // refused there as it already was. Same whitelist as core's canServeOriginal;
   // the two have to agree on this or one of them serves what the other refuses.
-  if (info && (info.isVideoExt || (info.isImageExt && info.ext !== "psd"))) {
+  if (
+    info &&
+    (info.isVideoExt ||
+      (info.isImageExt && info.ext !== "psd") ||
+      info.isRawExt)
+  ) {
     // Returns null the moment any transform or parameter is present, so a
     // genuine transformation still falls through below.
     const original = await serveOriginalFallback(

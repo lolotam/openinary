@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {
   ALLOWED_UPLOAD_TYPES,
   allowedUploadExtensions,
+  assetKindForExt,
   contentTypeForExt,
+  dispositionForExt,
+  isTransformableImageExt,
   stripUrlHostile,
   validateUploadContent,
   validateUploadFileType,
@@ -86,23 +89,44 @@ test("accepts audio and 3D uploads with the MIME variants browsers send", () => 
 test("still rejects disallowed types and ext/MIME mismatches", () => {
   assert.ok(!validateUploadFileType("evil.svg", "image/svg+xml"));
   assert.ok(!validateUploadFileType("clip.wav", "video/mp4"));
+  assert.ok(!validateUploadFileType("vault.zip", "image/jpeg"));
+});
+
+test("accepts raw archives, documents and data files", () => {
+  assert.ok(validateUploadFileType("vault.zip", "application/zip"));
+  assert.ok(validateUploadFileType("vault.zip", "application/x-zip-compressed"));
+  assert.ok(validateUploadFileType("vault.zip", "application/octet-stream"));
+  assert.ok(validateUploadFileType("vault.zip", "")); // browsers often send empty
+  assert.ok(validateUploadFileType("index.html", "text/html"));
+  assert.ok(validateUploadFileType("page.htm", "text/html"));
+  assert.ok(validateUploadFileType("notes.csv", "text/csv"));
+  assert.ok(validateUploadFileType("data.json", "application/json"));
+  assert.ok(validateUploadFileType("doc.pdf", "application/pdf"));
+  assert.ok(
+    validateUploadFileType(
+      "brief.docx",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ),
+  );
 });
 
 test("the existing image/video whitelist is preserved", () => {
   assert.deepEqual(ALLOWED_UPLOAD_TYPES["image/jpeg"], [".jpg", ".jpeg"]);
   assert.deepEqual(ALLOWED_UPLOAD_TYPES["image/heic"], [".heic", ".heif"]);
   assert.deepEqual(ALLOWED_UPLOAD_TYPES["video/mp4"], [".mp4"]);
-  // octet-stream now covers psd + the new 3D types
-  assert.deepEqual(ALLOWED_UPLOAD_TYPES["application/octet-stream"], [
-    ".psd",
-    ".glb",
-    ".gltf",
-  ]);
+  // octet-stream covers psd + 3D + archives/office that browsers send that way
+  const octet = ALLOWED_UPLOAD_TYPES["application/octet-stream"];
+  for (const ext of [".psd", ".glb", ".gltf", ".zip", ".pdf", ".docx"]) {
+    assert.ok(octet.includes(ext), `${ext} should be allowed as octet-stream`);
+  }
 });
 
 test("allowedUploadExtensions lists the accepted types for error messages", () => {
   const exts = allowedUploadExtensions();
-  for (const e of ["glb", "gltf", "wav", "mp3", "ogg", "jpg", "mp4", "psd"]) {
+  for (const e of [
+    "glb", "gltf", "wav", "mp3", "ogg", "jpg", "mp4", "psd",
+    "zip", "html", "pdf", "csv", "json", "docx",
+  ]) {
     assert.ok(exts.includes(e), `${e} should be listed`);
   }
   // sorted + de-duplicated (aliases like jpeg/jpg both appear once each)
@@ -114,8 +138,44 @@ test("content-type comes from the same table; unknown falls back to octet-stream
   assert.equal(contentTypeForExt("wav"), "audio/wav");
   assert.equal(contentTypeForExt("jpeg"), "image/jpeg"); // alias of jpg
   assert.equal(contentTypeForExt("mp4"), "video/mp4");
+  assert.equal(contentTypeForExt("zip"), "application/zip");
+  assert.equal(contentTypeForExt("html"), "text/html; charset=utf-8");
+  assert.equal(contentTypeForExt("pdf"), "application/pdf");
   assert.equal(contentTypeForExt("xyz"), "application/octet-stream");
   assert.equal(contentTypeForExt(undefined), "application/octet-stream");
+});
+
+test("contentTypeForExt and dispositionForExt for raw types", () => {
+  assert.equal(contentTypeForExt("zip"), "application/zip");
+  assert.equal(contentTypeForExt("html"), "text/html; charset=utf-8");
+  assert.equal(contentTypeForExt("pdf"), "application/pdf");
+  assert.equal(dispositionForExt("zip", "vault.zip"), 'attachment; filename="vault.zip"');
+  assert.equal(dispositionForExt("html", "page.html"), 'attachment; filename="page.html"');
+  assert.equal(dispositionForExt("xml", "data.xml"), 'attachment; filename="data.xml"');
+  assert.equal(dispositionForExt("pdf", "doc.pdf"), "inline");
+  assert.match(
+    dispositionForExt("zip", "日本語.zip"),
+    /filename\*=UTF-8''/,
+  );
+  assert.equal(dispositionForExt("jpg", "photo.jpg"), "inline");
+  assert.equal(
+    dispositionForExt("pdf", "doc.pdf", true),
+    'attachment; filename="doc.pdf"',
+  );
+});
+
+test("asset kind and transformable-image helper", () => {
+  assert.equal(assetKindForExt("zip"), "raw");
+  assert.equal(assetKindForExt("html"), "raw");
+  assert.equal(assetKindForExt("jpg"), "image");
+  assert.equal(assetKindForExt("mp4"), "video");
+  assert.equal(assetKindForExt("wav"), "audio");
+  assert.equal(assetKindForExt("glb"), "model");
+  assert.equal(assetKindForExt("xyz"), null);
+  assert.equal(isTransformableImageExt("jpg"), true);
+  assert.equal(isTransformableImageExt("psd"), true);
+  assert.equal(isTransformableImageExt("zip"), false);
+  assert.equal(isTransformableImageExt("mp4"), false);
 });
 
 // --- content validation (magic bytes) ---------------------------------------
@@ -184,5 +244,22 @@ test("empty and truncated files are rejected, not crashed on", () => {
 test("an extension with no signature is left to the whitelist", () => {
   // validateUploadFileType already rejects these; content check must not be the
   // thing that decides, or a newly whitelisted type would silently 400.
-  assert.ok(validateUploadContent("notes.txt", body("hello")));
+  assert.ok(validateUploadContent("notes.xyz", body("hello")));
+});
+
+test("raw magic bytes match; renamed payloads do not", () => {
+  assert.ok(validateUploadContent("vault.zip", body("PK\x03\x04")));
+  assert.ok(validateUploadContent("doc.pdf", body("%PDF-1.7")));
+  assert.ok(validateUploadContent("page.html", body("<!DOCTYPE html>")));
+  // text matchers reject NULs, so these are real short files, not NUL-padded
+  assert.ok(validateUploadContent("data.json", Buffer.from('[{"a":1}]')));
+  assert.ok(validateUploadContent("notes.txt", Buffer.from("hello")));
+  assert.ok(validateUploadContent("notes.csv", Buffer.from("a,b,c\n1,2,3")));
+  const tarHead = Buffer.alloc(512);
+  tarHead.write("ustar", 257, "latin1");
+  assert.ok(validateUploadContent("archive.tar", tarHead));
+  assert.ok(!validateUploadContent("vault.zip", body("<!DOCTYPE html>")));
+  assert.ok(!validateUploadContent("page.html", body("PK\x03\x04")));
+  assert.ok(!validateUploadContent("notes.txt", body("MZ\x90\x00")));
+  assert.ok(!validateUploadContent("data.json", body("<html><body>")));
 });

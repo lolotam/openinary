@@ -46,6 +46,7 @@
             "icon": "upload",
             "pages": [
               "guides/file-uploader",
+              "guides/raw-assets",
               "cloud/file-uploader",
               "guides/integrate/nextjs",
               "guides/integrate/react"

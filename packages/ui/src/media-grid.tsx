@@ -87,10 +87,10 @@ function FileTypeIcon({
   type,
   className,
 }: {
-  type: "image" | "video";
+  type: "image" | "video" | "raw";
   className?: string;
 }) {
-  const Icon = type === "video" ? FileVideo : FileImage;
+  const Icon = type === "video" ? FileVideo : type === "raw" ? File : FileImage;
   return (
     <div
       className={cn(
@@ -508,6 +508,7 @@ export function MediaGrid({
   // thumbnail (what the grid renders), not the original: /t/<video> now streams
   // the untouched file, which would pull hundreds of MB on a hover.
   const handleMediaHover = (media: MediaFile) => {
+    if (media.type === "raw") return;
     const previewUrl =
       media.type === "image"
         ? `${transformBaseUrl}/t/w_500,h_500,q_80/${encodePath(media.path)}`
@@ -1603,9 +1604,11 @@ export function MediaGrid({
                           // For images: resize and optimize
                           // For videos: extract thumbnail at 1 second as jpg image with crop mode to avoid stretching
                           const thumbnailUrl =
-                            media.type === "image"
-                              ? `${transformBaseUrl}/t/w_500,h_500,q_80/${encodePath(media.path)}`
-                              : `${transformBaseUrl}/t/t_true,tt_5,f_webp,w_500,h_500,c_fill,q_80/${encodePath(media.path)}`;
+                            media.type === "raw"
+                              ? null
+                              : media.type === "image"
+                                ? `${transformBaseUrl}/t/w_500,h_500,q_80/${encodePath(media.path)}`
+                                : `${transformBaseUrl}/t/t_true,tt_5,f_webp,w_500,h_500,c_fill,q_80/${encodePath(media.path)}`;
                           const isHovered = hoveredId === media.id;
 
                           return (
@@ -1651,7 +1654,7 @@ export function MediaGrid({
                                       }
                                     />
                                   </div>
-                                  {hideThumbnails ? (
+                                  {hideThumbnails || !thumbnailUrl ? (
                                     <FileTypeIcon type={media.type} />
                                   ) : (
                                     <VideoThumbnail
@@ -1782,9 +1785,11 @@ export function MediaGrid({
                   // transform server's cache is shared instead of generating a
                   // second thumbnail variant.
                   const thumbnailUrl =
-                    media.type === "image"
-                      ? `${transformBaseUrl}/t/w_500,h_500,q_80/${encodePath(media.path)}`
-                      : `${transformBaseUrl}/t/t_true,tt_5,f_webp,w_500,h_500,c_fill,q_80/${encodePath(media.path)}`;
+                    media.type === "raw"
+                      ? null
+                      : media.type === "image"
+                        ? `${transformBaseUrl}/t/w_500,h_500,q_80/${encodePath(media.path)}`
+                        : `${transformBaseUrl}/t/t_true,tt_5,f_webp,w_500,h_500,c_fill,q_80/${encodePath(media.path)}`;
 
                   return (
                     <div
@@ -1827,7 +1832,7 @@ export function MediaGrid({
                                 });
                               }}
                             >
-                              {hideThumbnails ? (
+                              {hideThumbnails || !thumbnailUrl ? (
                                 <FileTypeIcon type={media.type} />
                               ) : (
                                 <VideoThumbnail

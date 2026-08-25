@@ -126,8 +126,10 @@ export function createAuthenticatedRoute(deps: RouteDeps) {
         context: c,
       });
 
-      // Set response headers
+      // Set response headers. Drop Content-Length for buffered bodies — same
+      // framing rule as /t (duplicate Content-Length is a protocol error).
       Object.entries(result.headers).forEach(([key, value]) => {
+        if (key.toLowerCase() === "content-length" && !result.stream) return;
         c.header(key, value);
       });
 
@@ -148,12 +150,17 @@ export function createAuthenticatedRoute(deps: RouteDeps) {
 
       // Large payloads (e.g. untransformed originals) are streamed
       if (result.stream) {
+        if (result.status) c.status(result.status as 200);
         return c.body(result.stream);
       }
 
       // Video transform still running: no content to serve yet
       if (result.status === 202) {
         return c.body(new Uint8Array(result.buffer!), 202);
+      }
+
+      if (result.status === 206) {
+        return c.body(new Uint8Array(result.buffer!), 206);
       }
 
       // Transform params requested on a type that can't be transformed

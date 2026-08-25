@@ -37,6 +37,7 @@ export { invalidateListingCache } from "./utils/storage/listing-cache";
 // Routes (Hono sub-apps, each takes a RouteDeps and returns a mountable app)
 export type { RouteDeps } from "./config/deps";
 export { createTransformRoute } from "./routes/transform";
+export { createRawRoute } from "./routes/raw";
 export { createAuthenticatedRoute } from "./routes/authenticated";
 export { createStorageRoute } from "./routes/storage";
 export { createDownloadRoute } from "./routes/download";
@@ -51,6 +52,7 @@ export { createInvalidateRoute } from "./routes/invalidate";
 export { getUniqueFilePath } from "./utils/get-unique-file-path";
 export { getCachePath } from "./utils/cache";
 export { parseParams } from "./utils/parser";
+export { parseRangeHeader, parseRangeRequest } from "./utils/http-range";
 export { validateApiSecret } from "./utils/signature";
 export { generateUploadSignature, verifyUploadSignature } from "./utils/upload-signature";
 export {
@@ -60,6 +62,10 @@ export {
   validateUploadContent,
   contentTypeForExt,
   allowedUploadExtensions,
+  assetKindForExt,
+  isTransformableImageExt,
+  dispositionForExt,
+  type AssetKind,
 } from "./utils/upload-validation";
 export { deleteAssetCompletely, type DeleteAssetResult } from "./utils/asset-deletion";
 export { default as logger, serializeError } from "./utils/logger";

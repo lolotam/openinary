@@ -3,6 +3,7 @@ import { compress } from "hono/compress";
 import { cors } from "hono/cors";
 import {
   createTransformRoute,
+  createRawRoute,
   createAuthenticatedRoute,
   createStorageRoute,
   createDownloadRoute,
@@ -48,6 +49,7 @@ const deps: RouteDeps = {
 };
 
 const transform = createTransformRoute(deps);
+const raw = createRawRoute(deps);
 const authenticated = createAuthenticatedRoute(deps);
 const upload = createUploadRoute(deps);
 const storageRoute = createStorageRoute(deps);
@@ -112,6 +114,11 @@ app.route("/video-status", videoStatus);
 app.use("/t", publicRateLimit);
 app.use("/t/*", publicRateLimit);
 app.route("/t", transform);
+
+// Original-only delivery (no transformations). Same auth model as /t.
+app.use("/raw", publicRateLimit);
+app.use("/raw/*", publicRateLimit);
+app.route("/raw", raw);
 
 // Original file download route (public, consistent with /t/)
 app.use("/download", publicRateLimit);

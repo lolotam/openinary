@@ -225,6 +225,8 @@ for (const [name, mime] of [
   ["movie.mp4", "video/mp4"],
   ["movie.avi", "video/x-msvideo"],
   ["noextension", "image/png"],
+  ["vault.zip", ""],
+  ["notes.txt", ""],
 ] as const) {
   assert.equal(
     validateUploadFileType(name, mime),
@@ -233,6 +235,9 @@ for (const [name, mime] of [
   );
 }
 assert.equal(validateUploadFileType("logo.svg", "image/svg+xml"), false);
+assert.equal(validateUploadFileType("vault.zip", "application/zip"), true);
+assert.equal(validateUploadFileType("index.html", "text/html"), true);
+assert.equal(coreValidateUploadFileType("vault.zip", "application/zip"), true);
 
 // Same reasoning for the other half of "what may enter storage": core strips
 // the characters that make a key unaddressable through a URL, and so does

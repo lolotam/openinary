@@ -10,8 +10,12 @@ import {
 
 test('getMediaType recognizes image, video and other extensions', () => {
   assert.equal(getMediaType('a.PNG'), 'image');
+  assert.equal(getMediaType('shot.heic'), 'image');
+  assert.equal(getMediaType('shot.heif'), 'image');
   assert.equal(getMediaType('b.webm'), 'video');
-  assert.equal(getMediaType('c.txt'), null);
+  assert.equal(getMediaType('c.txt'), 'raw');
+  assert.equal(getMediaType('vault.zip'), 'raw');
+  assert.equal(getMediaType('x.unknown'), null);
 });
 
 test('normalizeLevelPath accepts root and nested paths', () => {

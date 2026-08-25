@@ -1,3 +1,5 @@
+import { assetKindForExt } from "./upload-validation";
+
 export const IMAGE_EXTENSIONS = [
   ".jpg",
   ".jpeg",
@@ -6,11 +8,13 @@ export const IMAGE_EXTENSIONS = [
   ".gif",
   ".avif",
   ".psd",
+  ".heic",
+  ".heif",
 ];
 
 export const VIDEO_EXTENSIONS = [".mp4", ".mov", ".webm"];
 
-export type MediaType = "image" | "video";
+export type MediaType = "image" | "video" | "raw";
 
 export type FolderPreviewItem = { path: string; type: MediaType };
 
@@ -41,6 +45,9 @@ export function getMediaType(name: string): MediaType | null {
   const lower = name.toLowerCase();
   if (IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext))) return "image";
   if (VIDEO_EXTENSIONS.some((ext) => lower.endsWith(ext))) return "video";
+  const ext = lower.includes(".") ? lower.slice(lower.lastIndexOf(".") + 1) : "";
+  const kind = assetKindForExt(ext);
+  if (kind === "audio" || kind === "model" || kind === "raw") return "raw";
   return null;
 }
 
@@ -113,7 +120,7 @@ export function shapeFolderSummary(
     if (previewItems.length >= previewLimit) break;
     const name = obj.key.slice(storagePrefix.length);
     const type = getMediaType(name);
-    if (type) {
+    if (type === "image" || type === "video") {
       previewItems.push({
         path: folderPath ? `${folderPath}/${name}` : name,
         type,

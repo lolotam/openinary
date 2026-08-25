@@ -8,9 +8,16 @@ import path from "path";
  *
  * Consumed by the OSS API and the SaaS so their whitelists cannot diverge.
  * Deliberately excludes svg (stored-XSS vector when served inline). Images and
- * videos go through the transform pipeline; audio and 3D are stored and served
- * as opaque originals (no transform pipeline).
+ * videos go through the transform pipeline; audio, 3D and raw/document files
+ * are stored and served as opaque originals (no transform pipeline).
+ *
+ * HTML is accepted as a stored document but is never served for inline
+ * execution: fullstack Docker shares an origin between the dashboard and /t/*,
+ * and presigned uploads are untrusted, so a text/html inline response would be
+ * stored XSS. Delivery uses Content-Disposition: attachment plus a sandbox CSP.
  */
+export type AssetKind = "image" | "video" | "audio" | "model" | "raw";
+
 interface MediaType {
   /** canonical extension, no dot, lowercase */
   ext: string;
@@ -20,6 +27,14 @@ interface MediaType {
   contentType: string;
   /** MIME values a browser may send for this type at upload (includes contentType) */
   uploadMimes: readonly string[];
+  /** pipeline / listing classification */
+  kind: AssetKind;
+  /**
+   * How the original is offered to a browser. Archives, office docs and HTML
+   * download; everything else (including PDF) can render inline. Omitted means
+   * inline.
+   */
+  disposition?: "inline" | "attachment";
   /**
    * Does the file body actually look like this type? Filename and MIME are both
    * client-controlled, so this is the only check an attacker cannot simply set.
@@ -50,66 +65,227 @@ const isoBmff = (head: Buffer): boolean =>
 const riff = (head: Buffer, form: string): boolean =>
   marker(head, 0, "RIFF") && marker(head, 8, form);
 
+const stripBom = (head: Buffer): string => {
+  let text = head.toString("utf8");
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  return text;
+};
+
 /**
  * A text format we only need to tell apart from markup and binaries: the first
  * meaningful character must open a JSON object. Deliberately not a full parse -
  * that would mean reading whole files to reject `<script>`.
  */
-const jsonObject = (head: Buffer): boolean => {
-  let text = head.toString("utf8");
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1); // strip BOM
-  return text.trimStart().startsWith("{");
+const jsonObject = (head: Buffer): boolean =>
+  stripBom(head).trimStart().startsWith("{");
+
+/** JSON value: object or array. Used for generic .json, not glTF. */
+const jsonValue = (head: Buffer): boolean => {
+  const start = stripBom(head).trimStart();
+  return start.startsWith("{") || start.startsWith("[");
 };
+
+/** Markup / XML / HTML: first meaningful character is '<'. */
+const markup = (head: Buffer): boolean =>
+  stripBom(head).trimStart().startsWith("<");
+
+/**
+ * Text-ish formats (txt, csv, md) have no magic bytes. Reject empty files,
+ * NUL-containing binaries, and a few well-known executable/archive signatures
+ * so a PE or zip cannot be stored as notes.txt.
+ */
+const looksLikeText = (head: Buffer): boolean => {
+  if (head.length === 0) return false;
+  if (head.includes(0)) return false;
+  if (marker(head, 0, "MZ")) return false;
+  if (marker(head, 0, "PK")) return false;
+  if (marker(head, 0, "%PDF")) return false;
+  if (head[0] === 0x1f && head[1] === 0x8b) return false;
+  if (marker(head, 0, "\x89PNG")) return false;
+  if (head[0] === 0xff && head[1] === 0xd8) return false;
+  return true;
+};
+
+const zipLocal = (head: Buffer): boolean =>
+  marker(head, 0, "PK\x03\x04") ||
+  marker(head, 0, "PK\x05\x06") ||
+  marker(head, 0, "PK\x07\x08");
+
+const oleCompound = (head: Buffer): boolean =>
+  head.length >= 4 &&
+  head[0] === 0xd0 &&
+  head[1] === 0xcf &&
+  head[2] === 0x11 &&
+  head[3] === 0xe0;
+
+const TRANSFORMABLE_IMAGE_EXTS = new Set([
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "avif",
+  "gif",
+  "psd",
+]);
 
 const MEDIA_TYPES: readonly MediaType[] = [
   // Images
   { ext: "jpg", aliases: ["jpeg"], contentType: "image/jpeg", uploadMimes: ["image/jpeg"],
+    kind: "image",
     matches: (h) => h[0] === 0xff && h[1] === 0xd8 && h[2] === 0xff },
   { ext: "png", contentType: "image/png", uploadMimes: ["image/png"],
+    kind: "image",
     matches: (h) => marker(h, 0, "\x89PNG\r\n\x1a\n") },
   { ext: "webp", contentType: "image/webp", uploadMimes: ["image/webp"],
+    kind: "image",
     matches: (h) => riff(h, "WEBP") },
   { ext: "avif", contentType: "image/avif", uploadMimes: ["image/avif"],
+    kind: "image",
     matches: isoBmff },
   { ext: "gif", contentType: "image/gif", uploadMimes: ["image/gif"],
+    kind: "image",
     matches: (h) => marker(h, 0, "GIF87a") || marker(h, 0, "GIF89a") },
   { ext: "heic", aliases: ["heif"], contentType: "image/heic",
     uploadMimes: ["image/heic", "image/heif"],
+    kind: "image",
     matches: isoBmff },
   { ext: "psd", contentType: "image/vnd.adobe.photoshop",
     uploadMimes: ["image/vnd.adobe.photoshop", "application/octet-stream"],
+    kind: "image",
     matches: (h) => marker(h, 0, "8BPS") },
   // Videos
   { ext: "mp4", contentType: "video/mp4", uploadMimes: ["video/mp4"],
+    kind: "video",
     matches: isoBmff },
   { ext: "mov", contentType: "video/quicktime", uploadMimes: ["video/quicktime"],
+    kind: "video",
     matches: isoBmff },
   { ext: "webm", contentType: "video/webm", uploadMimes: ["video/webm"],
+    kind: "video",
     // EBML header, shared with mkv
     matches: (h) => h[0] === 0x1a && h[1] === 0x45 && h[2] === 0xdf && h[3] === 0xa3 },
   // Audio (stored + delivered as originals, not transformed)
   { ext: "wav", contentType: "audio/wav", uploadMimes: ["audio/wav", "audio/x-wav"],
+    kind: "audio",
     matches: (h) => riff(h, "WAVE") },
   { ext: "mp3", contentType: "audio/mpeg", uploadMimes: ["audio/mpeg"],
+    kind: "audio",
     // Either an ID3 tag or a bare MPEG frame sync (11 set bits)
     matches: (h) =>
       marker(h, 0, "ID3") || (h[0] === 0xff && (h[1] & 0xe0) === 0xe0) },
   { ext: "ogg", contentType: "audio/ogg", uploadMimes: ["audio/ogg", "application/ogg"],
+    kind: "audio",
     matches: (h) => marker(h, 0, "OggS") },
   // 3D models (stored + delivered as originals). Browsers usually send .glb as
   // application/octet-stream, the same as .psd - the content check below is what
   // keeps that generic MIME from being a way in for arbitrary binaries.
   { ext: "glb", contentType: "model/gltf-binary",
     uploadMimes: ["model/gltf-binary", "application/octet-stream"],
+    kind: "model",
     matches: (h) => marker(h, 0, "glTF") },
   { ext: "gltf", contentType: "model/gltf+json",
     uploadMimes: ["model/gltf+json", "application/octet-stream"],
+    kind: "model",
     matches: jsonObject },
+  // Archives
+  { ext: "zip", contentType: "application/zip",
+    uploadMimes: ["application/zip", "application/x-zip-compressed", "application/x-zip", "application/octet-stream"],
+    kind: "raw", disposition: "attachment",
+    matches: zipLocal },
+  { ext: "tar", contentType: "application/x-tar",
+    uploadMimes: ["application/x-tar", "application/octet-stream"],
+    kind: "raw", disposition: "attachment",
+    // POSIX ustar magic lives at offset 257; the content window is 512 bytes.
+    matches: (h) => marker(h, 257, "ustar") },
+  { ext: "gz", contentType: "application/gzip",
+    uploadMimes: ["application/gzip", "application/x-gzip", "application/octet-stream"],
+    kind: "raw", disposition: "attachment",
+    matches: (h) => h[0] === 0x1f && h[1] === 0x8b },
+  { ext: "7z", contentType: "application/x-7z-compressed",
+    uploadMimes: ["application/x-7z-compressed", "application/octet-stream"],
+    kind: "raw", disposition: "attachment",
+    matches: (h) => marker(h, 0, "7z\xBC\xAF\x27\x1C") },
+  { ext: "rar", contentType: "application/vnd.rar",
+    uploadMimes: ["application/vnd.rar", "application/x-rar-compressed", "application/octet-stream"],
+    kind: "raw", disposition: "attachment",
+    matches: (h) => marker(h, 0, "Rar!\x1A\x07") },
+  // Web & data
+  { ext: "html", aliases: ["htm"], contentType: "text/html; charset=utf-8",
+    uploadMimes: ["text/html"],
+    kind: "raw", disposition: "attachment",
+    matches: markup },
+  { ext: "json", contentType: "application/json",
+    uploadMimes: ["application/json"],
+    kind: "raw",
+    matches: jsonValue },
+  { ext: "xml", contentType: "application/xml",
+    uploadMimes: ["application/xml", "text/xml"],
+    kind: "raw", disposition: "attachment",
+    matches: markup },
+  { ext: "csv", contentType: "text/csv; charset=utf-8",
+    uploadMimes: ["text/csv", "text/plain"],
+    kind: "raw",
+    matches: looksLikeText },
+  { ext: "txt", contentType: "text/plain; charset=utf-8",
+    uploadMimes: ["text/plain"],
+    kind: "raw",
+    matches: looksLikeText },
+  { ext: "md", contentType: "text/markdown; charset=utf-8",
+    uploadMimes: ["text/markdown", "text/plain"],
+    kind: "raw",
+    matches: looksLikeText },
+  // Documents
+  { ext: "pdf", contentType: "application/pdf",
+    uploadMimes: ["application/pdf", "application/octet-stream"],
+    kind: "raw",
+    matches: (h) => marker(h, 0, "%PDF") },
+  { ext: "doc", contentType: "application/msword",
+    uploadMimes: ["application/msword", "application/octet-stream"],
+    kind: "raw", disposition: "attachment",
+    matches: oleCompound },
+  { ext: "docx",
+    contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    uploadMimes: [
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/octet-stream",
+    ],
+    kind: "raw", disposition: "attachment",
+    matches: zipLocal },
+  { ext: "xls", contentType: "application/vnd.ms-excel",
+    uploadMimes: ["application/vnd.ms-excel", "application/octet-stream"],
+    kind: "raw", disposition: "attachment",
+    matches: oleCompound },
+  { ext: "xlsx",
+    contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    uploadMimes: [
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/octet-stream",
+    ],
+    kind: "raw", disposition: "attachment",
+    matches: zipLocal },
+  { ext: "ppt", contentType: "application/vnd.ms-powerpoint",
+    uploadMimes: ["application/vnd.ms-powerpoint", "application/octet-stream"],
+    kind: "raw", disposition: "attachment",
+    matches: oleCompound },
+  { ext: "pptx",
+    contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    uploadMimes: [
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/octet-stream",
+    ],
+    kind: "raw", disposition: "attachment",
+    matches: zipLocal },
 ];
 
 const CONTENT_TYPE_BY_EXT: Readonly<Record<string, string>> = Object.fromEntries(
   MEDIA_TYPES.flatMap((t) =>
     [t.ext, ...(t.aliases ?? [])].map((e) => [e, t.contentType] as const),
+  ),
+);
+
+const TYPE_BY_EXT: ReadonlyMap<string, MediaType> = new Map(
+  MEDIA_TYPES.flatMap((t) =>
+    [t.ext, ...(t.aliases ?? [])].map((e) => [e, t] as const),
   ),
 );
 
@@ -148,39 +324,85 @@ export function allowedUploadExtensions(): string[] {
   ].sort();
 }
 
+export function assetKindForExt(ext: string | undefined): AssetKind | null {
+  if (!ext) return null;
+  return TYPE_BY_EXT.get(ext.toLowerCase())?.kind ?? null;
+}
+
+export function isTransformableImageExt(ext: string | undefined): boolean {
+  return !!ext && TRANSFORMABLE_IMAGE_EXTS.has(ext.toLowerCase());
+}
+
+function rfc5987Disposition(
+  kind: "inline" | "attachment",
+  filename: string,
+): string {
+  const raw = path.basename(filename).replace(/["\r\n\\]/g, "") || "download";
+  // HTTP header values are a ByteString. Non-ASCII names (already allowed in
+  // storage keys) must not be written raw — Node rejects them, and that
+  // would 500 a bare /t/ of a video named with CJK/Arabic characters.
+  const ascii = raw.replace(/[^\x20-\x7e]/g, "_") || "download";
+  const encoded = encodeURIComponent(raw);
+  if (kind === "inline") return "inline";
+  return ascii === raw
+    ? `attachment; filename="${ascii}"`
+    : `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
+ * Content-Disposition for a stored original. Archives, office documents,
+ * HTML and XML always download; PDF and everything else render inline unless
+ * the caller asked for a download (`?dl=1`).
+ */
+export function dispositionForExt(
+  ext: string | undefined,
+  filename: string,
+  forceDownload = false,
+): string {
+  const type = ext ? TYPE_BY_EXT.get(ext.toLowerCase()) : undefined;
+  const kind: "inline" | "attachment" =
+    forceDownload || !type || type.disposition === "attachment"
+      ? "attachment"
+      : "inline";
+  return rfc5987Disposition(kind, filename);
+}
+
 /**
  * Validates an upload's file type: the MIME type must be allowed and the
  * filename extension must match that MIME type.
  *
  * Both inputs come from the client, so this rejects honest mistakes rather than
  * attacks - pair it with validateUploadContent, which reads the bytes.
+ *
+ * An empty MIME (what Chrome sends for zip/7z/rar on some platforms) is
+ * accepted when the extension itself is in the table; the content check still
+ * runs.
  */
 export function validateUploadFileType(
   filename: string,
   mimeType: string,
 ): boolean {
+  const ext = path.extname(filename).toLowerCase();
+  if (!ext) return false;
+  if (!mimeType) {
+    return TYPE_BY_EXT.has(ext.replace(/^\./, ""));
+  }
   const allowedExtensions = ALLOWED_UPLOAD_TYPES[mimeType];
   if (!allowedExtensions) {
     return false;
   }
-  return allowedExtensions.includes(path.extname(filename).toLowerCase());
+  return allowedExtensions.includes(ext);
 }
-
-const TYPE_BY_EXT: ReadonlyMap<string, MediaType> = new Map(
-  MEDIA_TYPES.flatMap((t) =>
-    [t.ext, ...(t.aliases ?? [])].map((e) => [e, t] as const),
-  ),
-);
 
 /**
  * Checks the file's own bytes against the type its name claims.
  *
  * The MIME type and the extension are both set by whoever is uploading, so on
  * their own they stop a mistake, not an attacker: anything can be named
- * `.glb` and sent as `application/octet-stream`. Stored originals (audio, 3D)
- * are served back untouched, so nothing downstream would notice the mismatch -
- * images and videos only get caught today because the transform pipeline
- * re-encodes them.
+ * `.glb` and sent as `application/octet-stream`. Stored originals (audio, 3D,
+ * raw documents) are served back untouched, so nothing downstream would notice
+ * the mismatch - images and videos only get caught today because the transform
+ * pipeline re-encodes them.
  *
  * Signatures live on the same table as the whitelist so a new type cannot be
  * accepted without one. Returns true for an extension we have no signature
@@ -195,9 +417,10 @@ export function validateUploadContent(
   if (!type) {
     return true; // unknown extension: validateUploadFileType already rejected it
   }
-  // 64 bytes covers every signature above; JSON detection needs a little slack
-  // for leading whitespace.
-  return type.matches(content.subarray(0, 64));
+  // 512 bytes covers tar's ustar magic at offset 257 and leaves slack for
+  // leading whitespace on JSON/HTML. Every other signature is in the first
+  // few bytes.
+  return type.matches(content.subarray(0, 512));
 }
 
 /**

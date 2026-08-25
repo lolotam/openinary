@@ -15,5 +15,7 @@ export function formatDate(date: Date | null): string {
 export function getFileType(asset: MediaFile | null): string {
   if (!asset) return "Unknown";
   const ext = asset.name.split(".").pop()?.toUpperCase() || "";
-  return `${ext} ${asset.type === "image" ? "Image" : "Video"}`;
+  const kind =
+    asset.type === "image" ? "Image" : asset.type === "video" ? "Video" : "File";
+  return `${ext} ${kind}`;
 }

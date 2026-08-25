@@ -61,12 +61,18 @@ export function createTransformRoute(deps: RouteDeps) {
 
       // Large payloads (e.g. untransformed originals) are streamed
       if (result.stream) {
+        if (result.status) c.status(result.status as 200);
         return c.body(result.stream);
       }
 
       // Video transform still running: no content to serve yet
       if (result.status === 202) {
         return c.body(new Uint8Array(result.buffer!), 202);
+      }
+
+      // Byte-range of a buffered original (unusual; streams cover this path)
+      if (result.status === 206) {
+        return c.body(new Uint8Array(result.buffer!), 206);
       }
 
       // Transform params requested on a type that can't be transformed

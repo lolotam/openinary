@@ -128,7 +128,32 @@ export async function middleware(request: NextRequest) {
   // the dashboard serves is private, so tell crawlers to drop the lot -- the
   // header rides along on the /login redirect too, which a <meta> tag can't do.
   response.headers.set("X-Robots-Tag", "noindex, nofollow");
+  if (!isStaticAsset(request.nextUrl.pathname)) {
+    markUncacheable(response);
+  }
   return response;
+}
+
+function isStaticAsset(pathname: string): boolean {
+  return (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon.ico") ||
+    pathname.includes(".")
+  );
+}
+
+/**
+ * Pages and auth endpoints are per-user. A CDN in front of the dashboard
+ * (e.g. a Cloudflare "Cache Everything" rule) once cached the anonymous
+ * `GET /api/auth/get-session` reply, so after a successful 2FA sign-in every
+ * session check returned that cached "no session" and bounced back to /login.
+ * The CDN-specific headers are honoured by Cloudflare and other CDNs even
+ * when they rewrite the browser-facing Cache-Control.
+ */
+function markUncacheable(response: NextResponse): void {
+  response.headers.set("Cache-Control", "private, no-store, max-age=0");
+  response.headers.set("CDN-Cache-Control", "no-store");
+  response.headers.set("Cloudflare-CDN-Cache-Control", "no-store");
 }
 
 async function handleRequest(request: NextRequest) {

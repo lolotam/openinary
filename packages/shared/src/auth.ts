@@ -410,6 +410,9 @@ export const auth = betterAuth({
   trustedOrigins: trustedOrigins,
   // Configure secure cookies only when explicitly using HTTPS
   advanced: {
+    ipAddress: {
+      ipAddressHeaders: ["x-real-ip", "x-forwarded-for"],
+    },
     defaultCookieAttributes: {
       secure: cookieOriginUrl.startsWith("https://"), // Use the public origin when deciding cookie security
       httpOnly: true, // Prevent client-side JavaScript access

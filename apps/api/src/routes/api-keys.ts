@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import { auth } from "shared/auth";
-import { apiKeyAuth, AuthVariables } from "../middleware/auth";
+import { sessionOnlyAuth, AuthVariables } from "../middleware/auth";
 import { logger, serializeError } from "@openinary/core";
 
 const apiKeys = new Hono<AuthVariables>();
 
-// Apply authentication middleware to all routes
-apiKeys.use("/*", apiKeyAuth);
+// API key management requires a dashboard session, never another API key
+apiKeys.use("/*", sessionOnlyAuth);
 
 /**
  * Create a new API key
@@ -97,7 +97,7 @@ apiKeys.get("/list", async (c) => {
       .prepare(
         `SELECT id, name, start, prefix, enabled, expiresAt, createdAt, updatedAt, remaining, rateLimitEnabled 
          FROM apiKey 
-         WHERE userId = ? 
+         WHERE referenceId = ?
          ORDER BY createdAt DESC`
       )
       .all(user.id);
@@ -140,8 +140,8 @@ apiKeys.delete("/:keyId", async (c) => {
     // Verify the key belongs to this user
     const db = auth.options.database;
     const key = db
-      .prepare("SELECT userId FROM apiKey WHERE id = ?")
-      .get(keyId) as { userId: string } | undefined;
+      .prepare("SELECT referenceId FROM apiKey WHERE id = ?")
+      .get(keyId) as { referenceId: string } | undefined;
 
     if (!key) {
       return c.json(
@@ -153,7 +153,7 @@ apiKeys.delete("/:keyId", async (c) => {
       );
     }
 
-    if (key.userId !== user.id) {
+    if (key.referenceId !== user.id) {
       return c.json(
         {
           error: "Forbidden",
@@ -168,6 +168,7 @@ apiKeys.delete("/:keyId", async (c) => {
       body: {
         keyId,
       },
+      headers: c.req.raw.headers,
     });
 
     return c.json({
@@ -210,8 +211,8 @@ apiKeys.patch("/:keyId", async (c) => {
     // Verify the key belongs to this user
     const db = auth.options.database;
     const key = db
-      .prepare("SELECT userId FROM apiKey WHERE id = ?")
-      .get(keyId) as { userId: string } | undefined;
+      .prepare("SELECT referenceId FROM apiKey WHERE id = ?")
+      .get(keyId) as { referenceId: string } | undefined;
 
     if (!key) {
       return c.json(
@@ -223,7 +224,7 @@ apiKeys.patch("/:keyId", async (c) => {
       );
     }
 
-    if (key.userId !== user.id) {
+    if (key.referenceId !== user.id) {
       return c.json(
         {
           error: "Forbidden",
@@ -240,6 +241,7 @@ apiKeys.patch("/:keyId", async (c) => {
         name,
         enabled,
       },
+      headers: c.req.raw.headers,
     });
 
     return c.json({

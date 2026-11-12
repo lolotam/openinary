@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { promises as fs } from 'fs';
 import { join, dirname } from 'path';
 import { existsSync } from 'fs';
@@ -76,13 +77,29 @@ export class SmartCache {
  * Generate cache path for a given request path
  */
 export function getCachePath(requestPath: string): string {
-  // Create a safe filename from the request path
-  const safePath = requestPath
+  // The readable part keeps cache files greppable and lets deleteCachedFiles
+  // match them by name, but it is lossy: every non-ASCII character becomes
+  // "_", so "/t/w_300/صورة.jpg" and "/t/w_300/لوجو.jpg" both reduce to
+  // "t_w_300_.jpg". The hash of the canonical request path keeps them apart;
+  // it sits before the extension so the entry still ends in its real format.
+  let canonicalPath = requestPath.replace(/^\/+/, '');
+  try {
+    canonicalPath = decodeURIComponent(canonicalPath);
+  } catch {
+    // Keep the original form when the path contains invalid percent encoding.
+  }
+  const safePath = canonicalPath
     .replace(/[^a-zA-Z0-9.-]/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '');
-  
-  return join(CACHE_DIR, safePath);
+  const hash = createHash('sha256').update(canonicalPath).digest('hex').slice(0, 16);
+  const extIndex = safePath.lastIndexOf('.');
+  const hashed =
+    extIndex > 0
+      ? `${safePath.slice(0, extIndex)}.${hash}${safePath.slice(extIndex)}`
+      : `${safePath}.${hash}`;
+
+  return join(CACHE_DIR, hashed);
 }
 
 /**

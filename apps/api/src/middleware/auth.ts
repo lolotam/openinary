@@ -1,6 +1,7 @@
 import { Context, Next } from "hono";
 import { auth } from "shared/auth";
 import { logger, serializeError } from "@openinary/core";
+import { getClientIP } from "./rate-limit";
 
 // Define the variables that will be available in the context
 export type AuthVariables = {
@@ -74,10 +75,7 @@ export async function authenticateRequest(
             apiKeyName: result.key.name,
             path: c.req.path,
             method: c.req.method,
-            ip:
-              c.req.header("x-forwarded-for") ||
-              c.req.header("x-real-ip") ||
-              "unknown",
+            ip: getClientIP(c),
           });
 
           return true;
@@ -88,10 +86,7 @@ export async function authenticateRequest(
             tokenPrefix: token.substring(0, 8) + "...",
             path: c.req.path,
             method: c.req.method,
-            ip:
-              c.req.header("x-forwarded-for") ||
-              c.req.header("x-real-ip") ||
-              "unknown",
+            ip: getClientIP(c),
           });
         }
       } catch (error) {
@@ -100,10 +95,7 @@ export async function authenticateRequest(
           error: error instanceof Error ? error.message : "unknown",
           path: c.req.path,
           method: c.req.method,
-          ip:
-            c.req.header("x-forwarded-for") ||
-            c.req.header("x-real-ip") ||
-            "unknown",
+          ip: getClientIP(c),
         });
       }
     }
@@ -135,10 +127,7 @@ export async function authenticateRequest(
             userId: sessionResult.user.id,
             path: c.req.path,
             method: c.req.method,
-            ip:
-              c.req.header("x-forwarded-for") ||
-              c.req.header("x-real-ip") ||
-              "unknown",
+            ip: getClientIP(c),
           });
 
           // Continue to authentication failure below
@@ -158,10 +147,7 @@ export async function authenticateRequest(
             userEmail: sessionResult.user.email,
             path: c.req.path,
             method: c.req.method,
-            ip:
-              c.req.header("x-forwarded-for") ||
-              c.req.header("x-real-ip") ||
-              "unknown",
+            ip: getClientIP(c),
           });
 
           return true;
@@ -181,8 +167,7 @@ export async function authenticateRequest(
     reason: "no_valid_credentials",
     path: c.req.path,
     method: c.req.method,
-    ip:
-      c.req.header("x-forwarded-for") || c.req.header("x-real-ip") || "unknown",
+    ip: getClientIP(c),
     hasAuthHeader: !!authHeader,
     hasCookie: !!cookieHeader,
   });
@@ -211,4 +196,33 @@ export async function apiKeyAuth(c: Context<AuthVariables>, next: Next) {
     },
     401,
   );
+}
+
+/**
+ * Restrict sensitive account management routes to a dashboard session.
+ */
+export async function sessionOnlyAuth(c: Context<AuthVariables>, next: Next) {
+  const authed = await authenticateRequest(c);
+
+  if (!authed) {
+    return c.json(
+      {
+        error: "Authentication required",
+        message: "A valid dashboard session cookie is required",
+      },
+      401,
+    );
+  }
+
+  if (c.get("apiKey")) {
+    return c.json(
+      {
+        error: "Forbidden",
+        message: "API keys cannot manage API keys; use a dashboard session",
+      },
+      403,
+    );
+  }
+
+  await next();
 }

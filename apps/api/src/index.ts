@@ -131,9 +131,11 @@ app.use("/download", publicRateLimit);
 app.use("/download/*", publicRateLimit);
 app.route("/download", download);
 
-// Folder ZIP download route (public)
+// Folder ZIP download route (API key or dashboard session required)
 app.use("/download-folder", publicRateLimit);
 app.use("/download-folder/*", publicRateLimit);
+app.use("/download-folder", apiKeyAuth);
+app.use("/download-folder/*", apiKeyAuth);
 app.route("/download-folder", downloadFolder);
 
 // Authenticated image transformation route (with signature verification)
@@ -141,10 +143,12 @@ app.use("/authenticated", publicRateLimit);
 app.use("/authenticated/*", publicRateLimit);
 app.route("/authenticated", authenticated);
 
-// Queue events SSE endpoint (public for real-time updates)
+// Queue events SSE endpoint (API key or dashboard session required)
 // This must be registered BEFORE the protected queue routes to avoid auth conflicts
 app.use("/queue/events", publicRateLimit);
 app.use("/queue/events/*", publicRateLimit);
+app.use("/queue/events", apiKeyAuth);
+app.use("/queue/events/*", apiKeyAuth);
 app.route("/queue/events", queueEvents);
 
 // Protected routes - require API key authentication
@@ -182,7 +186,7 @@ app.use("/invalidate/*", apiKeyAuth);
 app.route("/invalidate", invalidateRoute);
 
 // Queue management routes (protected)
-// Note: /queue/events is public (registered above), but other /queue/* routes require auth
+// Note: /queue/events is authenticated above, as are the other /queue/* routes
 app.use("/queue/*", apiKeyAuth);
 app.route("/queue", queue);
 

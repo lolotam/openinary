@@ -30,26 +30,21 @@ const RATE_LIMIT_WINDOW_MS = parseInt(process.env.PUBLIC_RATE_LIMIT_WINDOW_MS ||
 const EXCLUDED_PATHS: string[] = [];
 
 /**
- * Extract client IP address from request headers
- * Checks x-forwarded-for and x-real-ip headers (for reverse proxy scenarios)
- * Falls back to a default value if no IP can be determined
+ * Extract the client IP overwritten by the trusted nginx proxy.
+ * Prefer x-real-ip; otherwise use the last x-forwarded-for entry, never a
+ * client-injected entry further left. Fall back to a shared default.
  */
-function getClientIP(c: Context): string {
-  const forwardedFor = c.req.header("x-forwarded-for");
+export function getClientIP(c: Context): string {
   const realIP = c.req.header("x-real-ip");
-  
-  // x-forwarded-for can contain multiple IPs (client, proxy1, proxy2)
-  // We take the first one which is the original client IP
-  if (forwardedFor) {
-    return forwardedFor.split(",")[0].trim();
-  }
-  
   if (realIP) {
     return realIP.trim();
   }
-  
-  // Fallback: use a default identifier if IP cannot be determined
-  // This should rarely happen in production behind a reverse proxy
+
+  const forwardedFor = c.req.header("x-forwarded-for");
+  if (forwardedFor) {
+    return forwardedFor.split(",").at(-1)?.trim() || "unknown";
+  }
+
   return "unknown";
 }
 

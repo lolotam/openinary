@@ -70,6 +70,10 @@ export function createTransformRoute(deps: RouteDeps) {
         return c.body(new Uint8Array(result.buffer!), 202);
       }
 
+      if (result.status === 422) {
+        return c.body(new Uint8Array(result.buffer!), 422);
+      }
+
       // Byte-range of a buffered original (unusual; streams cover this path)
       if (result.status === 206) {
         return c.body(new Uint8Array(result.buffer!), 206);

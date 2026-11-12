@@ -1,10 +1,15 @@
 import { Context } from "hono";
 import { getCachePath, existsInCache, deleteCachedFiles } from "../utils/cache";
-import { parseParams, isTransformSegment } from "../utils/parser";
+import {
+  parseParams,
+  isTransformSegment,
+  TransformDimensionError,
+} from "../utils/parser";
 import { CloudStorage } from "../utils/storage/index";
 import { Compression } from "../utils/image/compression";
 import logger, { serializeError } from "../utils/logger";
 import type { VideoJobQueue } from "../utils/video-job-queue";
+import { isRetryBudgetExhausted } from "../utils/video-job-queue";
 import {
   checkCloudCache,
   checkLocalCache,
@@ -16,7 +21,10 @@ import {
   cleanupTempFile,
   performPeriodicCacheCleanup,
 } from "../routes/transform-helpers";
-import { TRANSFORMATION_PRIORITY } from "../utils/video/config";
+import {
+  TRANSFORMATION_PRIORITY,
+  VIDEO_JOB_FAILED_COOLDOWN_MINUTES,
+} from "../utils/video/config";
 import {
   VIDEO_FORMATS,
   contentTypeForFormat,
@@ -549,6 +557,29 @@ export class TransformService {
         "Video job exists",
       );
 
+      if (isRetryBudgetExhausted(existingJob)) {
+        const completedAt = existingJob.completedAt?.getTime();
+        const cooldownExpired =
+          completedAt !== undefined &&
+          Date.now() - completedAt >
+            VIDEO_JOB_FAILED_COOLDOWN_MINUTES * 60 * 1000;
+
+        if (!cooldownExpired) {
+          return {
+            buffer: Buffer.from(
+              JSON.stringify({
+                status: "failed",
+                message: "Video transformation failed",
+                error: existingJob.error,
+              }),
+            ),
+            contentType: "application/json",
+            status: 422,
+            headers: { "Cache-Control": "no-store" },
+          };
+        }
+      }
+
       // If completed, verify cache actually exists before serving
       if (existingJob.status === "completed" && cachePath) {
         const localCacheExists = await existsInCache(cachePath);
@@ -802,9 +833,12 @@ export class TransformService {
     request: TransformRequest,
   ): Promise<TransformResult> {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    if (errorMessage === "Invalid file path") {
+    if (
+      errorMessage === "Invalid file path" ||
+      error instanceof TransformDimensionError
+    ) {
       return {
-        buffer: Buffer.from("Invalid file path"),
+        buffer: Buffer.from(errorMessage),
         contentType: "text/plain",
         status: 400,
         headers: { "Cache-Control": "no-store" },

@@ -84,6 +84,10 @@ if (!fs.existsSync(dataDir)) {
 
 // Create database instance
 const db = new Database(dbPath);
+// Next.js and the API share this file; WAL and a busy timeout reduce cross-process lock failures.
+db.pragma("journal_mode = WAL");
+db.pragma("busy_timeout = 5000");
+db.pragma("synchronous = NORMAL");
 
 // Initialize database tables automatically
 function initializeTables() {

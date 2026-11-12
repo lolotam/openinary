@@ -21,6 +21,8 @@ export interface VideoJob {
   status: JobStatus;
   progress?: number;
   error?: string;
+  retryCount?: number;
+  maxRetries?: number;
   startedAt?: Date;
   completedAt?: Date;
 }
@@ -28,6 +30,19 @@ export interface VideoJob {
 /**
  * Convert database job to legacy format for backward compatibility
  */
+/**
+ * True when a job failed and the worker has used up its automatic retries;
+ * such a job must not be requeued on every request for the same URL.
+ */
+export function isRetryBudgetExhausted(job: VideoJob): boolean {
+  return (
+    job.status === "error" &&
+    job.retryCount !== undefined &&
+    job.maxRetries !== undefined &&
+    job.retryCount >= job.maxRetries
+  );
+}
+
 function convertDBJob(dbJob: DBVideoJob): VideoJob {
   return {
     id: dbJob.id,
@@ -37,6 +52,8 @@ function convertDBJob(dbJob: DBVideoJob): VideoJob {
     status: dbJob.status,
     progress: dbJob.progress,
     error: dbJob.error || undefined,
+    retryCount: dbJob.retry_count,
+    maxRetries: dbJob.max_retries,
     startedAt: dbJob.started_at ? new Date(dbJob.started_at) : undefined,
     completedAt: dbJob.completed_at ? new Date(dbJob.completed_at) : undefined,
   };

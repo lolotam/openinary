@@ -22,6 +22,12 @@ test("chunkFiles splits 127 files into 7 batches of 20 then 7", () => {
   );
 });
 
+test("chunkFiles starts a new batch before the byte cap is exceeded", () => {
+  const sizes = [400, 400, 400, 1500, 10];
+  const batches = chunkFiles(sizes, UPLOAD_BATCH_SIZE, 1000, (n) => n);
+  assert.deepEqual(batches, [[400, 400], [400], [1500], [10]]);
+});
+
 test("retryAfterMs uses Retry-After seconds and clamps", () => {
   const now = Date.parse("2026-01-01T00:00:00Z");
   assert.equal(

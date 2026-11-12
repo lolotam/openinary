@@ -163,6 +163,11 @@ export const JOB_RETRY_MAX = parseInt(
   10
 );
 
+export const VIDEO_JOB_FAILED_COOLDOWN_MINUTES = parseInt(
+  process.env.VIDEO_JOB_FAILED_COOLDOWN_MINUTES || "60",
+  10,
+);
+
 /**
  * Hours after which completed/error jobs are cleaned up
  */

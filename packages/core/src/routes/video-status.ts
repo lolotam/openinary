@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import type { RouteDeps } from "../config/deps";
-import { parseParams, isTransformSegment } from "../utils/parser";
+import {
+  parseParams,
+  isTransformSegment,
+  TransformDimensionError,
+} from "../utils/parser";
 import { getCachePath, existsInCache } from "../utils/cache";
+import { isRetryBudgetExhausted } from "../utils/video-job-queue";
 import logger, { serializeError } from "../utils/logger";
 
 /**
@@ -25,6 +30,15 @@ function resolveStatusTarget(requestPath: string) {
 export function createVideoStatusRoute(deps: RouteDeps) {
   const { storage, queue: videoJobQueue } = deps;
   const videoStatus = new Hono();
+
+  // resolveStatusTarget parses the transform segment, which rejects
+  // out-of-range w_/h_ values; answer 400 like the /t route instead of 500.
+  videoStatus.onError((error, c) => {
+    if (error instanceof TransformDimensionError) {
+      return c.json({ error: error.message }, 400);
+    }
+    throw error;
+  });
 
   /**
    * GET /video-status/:path/size
@@ -245,6 +259,18 @@ export function createVideoStatusRoute(deps: RouteDeps) {
           message: "No processing job found for this video",
         },
         404,
+      );
+    }
+
+    if (isRetryBudgetExhausted(job)) {
+      return c.json(
+        {
+          status: "failed",
+          message: "Video transformation failed",
+          error: job.error,
+        },
+        422,
+        { "Cache-Control": "no-store" },
       );
     }
 

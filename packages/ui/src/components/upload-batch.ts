@@ -1,4 +1,8 @@
 export const UPLOAD_BATCH_SIZE = 20;
+// Keeps each request under the API's per-request body cap (MAX_UPLOAD_REQUEST_MB,
+// default 1024 MiB) with headroom for multipart overhead. A single file larger
+// than this still goes alone; the per-file limit is enforced by the API.
+export const UPLOAD_BATCH_MAX_BYTES = 900 * 1024 * 1024;
 export const UPLOAD_MAX_ATTEMPTS = 3;
 export const RETRY_WAIT_MIN_MS = 1000;
 export const RETRY_WAIT_MAX_MS = 60_000;
@@ -22,11 +26,27 @@ export interface UploadResponse {
   error?: string;
 }
 
-export function chunkFiles<T>(files: T[], size: number): T[][] {
+export function chunkFiles<T>(
+  files: T[],
+  size: number,
+  maxBytes = Infinity,
+  sizeOf: (file: T) => number = () => 0,
+): T[][] {
   const batches: T[][] = [];
-  for (let i = 0; i < files.length; i += size) {
-    batches.push(files.slice(i, i + size));
+  let current: T[] = [];
+  let currentBytes = 0;
+  for (const file of files) {
+    const bytes = sizeOf(file);
+    const overflows = current.length > 0 && currentBytes + bytes > maxBytes;
+    if (current.length === size || overflows) {
+      batches.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(file);
+    currentBytes += bytes;
   }
+  if (current.length > 0) batches.push(current);
   return batches;
 }
 
@@ -89,7 +109,12 @@ export async function uploadFilesInBatches(opts: {
 }): Promise<UploadResponse> {
   const sleep = opts.sleep ?? defaultSleep;
   const now = opts.now ?? Date.now;
-  const batches = chunkFiles(opts.files, UPLOAD_BATCH_SIZE);
+  const batches = chunkFiles(
+    opts.files,
+    UPLOAD_BATCH_SIZE,
+    UPLOAD_BATCH_MAX_BYTES,
+    (file) => file.size,
+  );
   const files: UploadResult[] = [];
   const errors: UploadError[] = [];
 

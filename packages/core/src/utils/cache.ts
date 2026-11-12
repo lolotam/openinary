@@ -7,12 +7,17 @@ import logger, { serializeError } from './logger';
 
 // Cache directory
 const CACHE_DIR = './cache';
+const CACHE_MAX_SIZE_MB = Math.max(
+  1,
+  parseInt(process.env.CACHE_MAX_SIZE_MB ?? '2048', 10) || 2048,
+);
+const TMP_FILE_MAX_AGE_MS = 60 * 60 * 1000;
 
 export class SmartCache {
   private static stats: CacheStats = {
     requests: new Map(),
     totalCacheSize: 0,
-    maxCacheSize: 1024 * 1024 * 1024 // 1GB default
+    maxCacheSize: CACHE_MAX_SIZE_MB * 1024 * 1024
   };
 
   static async trackRequest(filePath: string, fileSize: number): Promise<void> {
@@ -43,34 +48,98 @@ export class SmartCache {
     return this.stats.totalCacheSize > this.stats.maxCacheSize * 0.8;
   }
 
-  static async performCleanup(): Promise<void> {
+  static async performCleanup(
+    cacheDir: string = CACHE_DIR,
+    maxCacheSize?: number,
+  ): Promise<void> {
     logger.info('Performing cache cleanup...');
-    
-    // Get all cache entries sorted by last access time
-    const entries = Array.from(this.stats.requests.entries())
-      .sort((a, b) => a[1].lastAccess - b[1].lastAccess);
 
-    // Remove oldest 20% of entries
-    const toRemove = entries.slice(0, Math.floor(entries.length * 0.2));
-    
-    for (const [filePath] of toRemove) {
-      const cachePath = getCachePath(filePath);
+    const entries = await listCacheEntries(cacheDir);
+    if (entries === null) {
+      this.stats.totalCacheSize = 0;
+      return;
+    }
+
+    entries.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    const targetSize = (maxCacheSize ?? this.stats.maxCacheSize) * 0.7;
+    const tmpCutoff = Date.now() - TMP_FILE_MAX_AGE_MS;
+    let totalSize = entries.reduce((sum, entry) => sum + entry.size, 0);
+    let removedCount = 0;
+
+    for (const entry of entries) {
+      const isStaleTmp = entry.isTmp && entry.mtimeMs < tmpCutoff;
+      if (entry.isTmp && !isStaleTmp) continue;
+      if (!isStaleTmp && totalSize <= targetSize) continue;
+
       try {
-        if (existsSync(cachePath)) {
-          await fs.unlink(cachePath);
-          const stats = this.stats.requests.get(filePath);
-          if (stats) {
-            this.stats.totalCacheSize -= stats.totalSize;
-          }
-        }
-        this.stats.requests.delete(filePath);
+        await fs.unlink(entry.filePath);
+        totalSize -= entry.size;
+        removedCount++;
       } catch (error) {
-        logger.warn({ error: serializeError(error), cachePath }, 'Failed to cleanup cache file');
+        logger.warn(
+          { error: serializeError(error), cachePath: entry.filePath },
+          'Failed to cleanup cache file',
+        );
       }
     }
-    
-    logger.info({ removedCount: toRemove.length }, 'Cache cleanup completed');
+
+    this.stats.totalCacheSize = Math.max(0, totalSize);
+    logger.info({ removedCount }, 'Cache cleanup completed');
   }
+}
+
+interface CacheEntry {
+  filePath: string;
+  size: number;
+  mtimeMs: number;
+  isTmp: boolean;
+}
+
+/** Files in the cache directory, or null when the directory does not exist. */
+async function listCacheEntries(cacheDir: string): Promise<CacheEntry[] | null> {
+  let files: string[];
+  try {
+    files = await fs.readdir(cacheDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+
+  const entries: CacheEntry[] = [];
+  for (const file of files) {
+    const filePath = join(cacheDir, file);
+    try {
+      const stats = await fs.stat(filePath);
+      if (stats.isFile()) {
+        entries.push({
+          filePath,
+          size: stats.size,
+          mtimeMs: stats.mtimeMs,
+          isTmp: file.includes('.tmp-'),
+        });
+      }
+    } catch (error) {
+      logger.warn({ error: serializeError(error), filePath }, 'Failed to stat cache file');
+    }
+  }
+  return entries;
+}
+
+function sanitizeCachePath(requestPath: string): {
+  canonicalPath: string;
+  safePath: string;
+} {
+  let canonicalPath = requestPath.replace(/^\/+/, '');
+  try {
+    canonicalPath = decodeURIComponent(canonicalPath);
+  } catch {
+    // Keep the original form when the path contains invalid percent encoding.
+  }
+  const safePath = canonicalPath
+    .replace(/[^a-zA-Z0-9.-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
+  return { canonicalPath, safePath };
 }
 
 /**
@@ -82,16 +151,7 @@ export function getCachePath(requestPath: string): string {
   // "_", so "/t/w_300/صورة.jpg" and "/t/w_300/لوجو.jpg" both reduce to
   // "t_w_300_.jpg". The hash of the canonical request path keeps them apart;
   // it sits before the extension so the entry still ends in its real format.
-  let canonicalPath = requestPath.replace(/^\/+/, '');
-  try {
-    canonicalPath = decodeURIComponent(canonicalPath);
-  } catch {
-    // Keep the original form when the path contains invalid percent encoding.
-  }
-  const safePath = canonicalPath
-    .replace(/[^a-zA-Z0-9.-]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '');
+  const { canonicalPath, safePath } = sanitizeCachePath(requestPath);
   const hash = createHash('sha256').update(canonicalPath).digest('hex').slice(0, 16);
   const extIndex = safePath.lastIndexOf('.');
   const hashed =
@@ -169,46 +229,41 @@ export async function initializeCache(): Promise<void> {
 
 /**
  * Delete all cached files related to an original file path
- * This scans the cache directory and removes files that contain the original path in their name
  */
-export async function deleteCachedFiles(originalPath: string): Promise<number> {
+export async function deleteCachedFiles(
+  originalPath: string,
+  cacheDir: string = CACHE_DIR,
+): Promise<number> {
   try {
-    if (!existsSync(CACHE_DIR)) {
+    if (!existsSync(cacheDir)) {
       logger.debug({ originalPath }, 'Cache directory does not exist');
       return 0;
     }
 
-    const files = await fs.readdir(CACHE_DIR);
+    const files = await fs.readdir(cacheDir);
+    const sanitizedOriginal = sanitizeCachePath(originalPath).safePath;
     let deletedCount = 0;
 
-    // Create a safe pattern to match files related to this original path
-    // The cache path is generated from the request path which includes the original file
-    const pathSegments = originalPath.split('/');
-    const fileName = pathSegments[pathSegments.length - 1];
-    const fileNameWithoutExt = fileName.split('.')[0];
-
     for (const file of files) {
-      const filePath = join(CACHE_DIR, file);
-      
+      const filePath = join(cacheDir, file);
+
+      const readablePart = file.replace(/\.[0-9a-f]{16}(?=\.|$)/, '');
+      const matchesOriginal =
+        readablePart === sanitizedOriginal ||
+        readablePart.endsWith(`_${sanitizedOriginal}`);
+      if (!matchesOriginal) continue;
+
       try {
         const stats = await fs.stat(filePath);
-        
         if (stats.isFile()) {
-          // Check if this file is related to our original path
-          // Cache files contain the original filename in their name
-          if (file.includes(fileNameWithoutExt) || file.includes(originalPath.replace(/[^a-zA-Z0-9.-]/g, '_'))) {
-            await fs.unlink(filePath);
-            
-            // Update cache stats
-            const cachedStats = SmartCache['stats'].requests.get(originalPath);
-            if (cachedStats) {
-              SmartCache['stats'].totalCacheSize -= cachedStats.totalSize;
-              SmartCache['stats'].requests.delete(originalPath);
-            }
-            
-            deletedCount++;
-            logger.debug({ file, originalPath }, 'Deleted cache file');
-          }
+          await fs.unlink(filePath);
+          SmartCache['stats'].totalCacheSize = Math.max(
+            0,
+            SmartCache['stats'].totalCacheSize - stats.size,
+          );
+          SmartCache['stats'].requests.delete(originalPath);
+          deletedCount++;
+          logger.debug({ file, originalPath }, 'Deleted cache file');
         }
       } catch (error) {
         logger.warn({ error: serializeError(error), file }, 'Failed to delete cache file');
@@ -226,18 +281,20 @@ export async function deleteCachedFiles(originalPath: string): Promise<number> {
 /**
  * Gets aggregate stats for the local cache directory
  */
-export async function getCacheSize(): Promise<{ size: number; fileCount: number }> {
+export async function getCacheSize(
+  cacheDir: string = CACHE_DIR,
+): Promise<{ size: number; fileCount: number }> {
   try {
-    if (!existsSync(CACHE_DIR)) {
+    if (!existsSync(cacheDir)) {
       return { size: 0, fileCount: 0 };
     }
 
-    const files = await fs.readdir(CACHE_DIR);
+    const files = await fs.readdir(cacheDir);
     let size = 0;
     let fileCount = 0;
 
     for (const file of files) {
-      const filePath = join(CACHE_DIR, file);
+      const filePath = join(cacheDir, file);
       try {
         const stats = await fs.stat(filePath);
         if (stats.isFile()) {
@@ -294,3 +351,6 @@ export async function clearAllCache(): Promise<number> {
 
 // Initialize cache on module load
 initializeCache();
+void getCacheSize().then(({ size }) => {
+  SmartCache['stats'].totalCacheSize = size;
+});

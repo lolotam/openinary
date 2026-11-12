@@ -1,6 +1,7 @@
 import { Context, Next } from "hono";
 import { AuthVariables, authenticateRequest } from "./auth";
 import { verifyUploadSignature, logger, serializeError } from "@openinary/core";
+import { MAX_UPLOAD_BODY_SIZE } from "../utils/upload-limits";
 
 /**
  * Allows POST /upload requests to authenticate either with a real API key /
@@ -15,6 +16,14 @@ export async function presignedOrApiKeyAuth(c: Context<AuthVariables>, next: Nex
   if (authed) {
     await next();
     return;
+  }
+
+  const contentLength = c.req.header("content-length");
+  if (
+    contentLength !== undefined &&
+    Number(contentLength) > MAX_UPLOAD_BODY_SIZE
+  ) {
+    return c.json({ success: false, error: "File too large" }, 413);
   }
 
   const API_SECRET = process.env.API_SECRET;

@@ -336,3 +336,99 @@ test("a ranged original is a 206 with Content-Range", async () => {
   assert.equal(result.headers["Content-Length"], "2");
   assert.equal(result.headers["Accept-Ranges"], "bytes");
 });
+
+
+test("an excessive transform dimension returns 400 before processing", async () => {
+  const result = await new TransformService(fakeStorage(), fakeQueue()).transform({
+    path: "/t/w_4097/photo.jpg",
+    userAgent: "",
+    context: {} as any,
+  });
+
+  assert.equal(result.status, 400);
+  assert.match(result.buffer!.toString(), /Invalid transform dimension/);
+  assert.equal(result.headers["Cache-Control"], "no-store");
+});
+
+
+test("an exhausted failed video job returns 422 without queueing another job", async () => {
+  let queued = false;
+  const queue = fakeQueue({
+    id: "failed-job",
+    status: "error",
+    error: "ffmpeg failed",
+    retryCount: 3,
+    maxRetries: 3,
+    completedAt: new Date(),
+  });
+  queue.addJob = async () => {
+    queued = true;
+    return "new-job";
+  };
+
+  const result = await new TransformService(fakeStorage(), queue).transform({
+    path: "/t/w_640/clip.mp4",
+    userAgent: "",
+    context: {} as any,
+  });
+
+  assert.equal(result.status, 422);
+  assert.equal(result.contentType, "application/json");
+  assert.equal(result.headers["Cache-Control"], "no-store");
+  assert.deepEqual(JSON.parse(result.buffer!.toString()), {
+    status: "failed",
+    message: "Video transformation failed",
+    error: "ffmpeg failed",
+  });
+  assert.equal(queued, false);
+});
+
+test("an exhausted failed video job requeues after the cooldown", async () => {
+  let queued = false;
+  const queue = fakeQueue({
+    id: "failed-job",
+    status: "error",
+    error: "ffmpeg failed",
+    retryCount: 3,
+    maxRetries: 3,
+    completedAt: new Date(Date.now() - 61 * 60 * 1000),
+  });
+  queue.addJob = async () => {
+    queued = true;
+    return "new-job";
+  };
+
+  const result = await new TransformService(fakeStorage(), queue).transform({
+    path: "/t/w_640/clip.mp4",
+    userAgent: "",
+    context: {} as any,
+  });
+
+  assert.equal(result.status, 202);
+  assert.equal(queued, true);
+});
+
+test("video-status reports the same exhausted failed state with no-store", async () => {
+  const queue = fakeQueue({
+    id: "failed-job",
+    status: "error",
+    error: "ffmpeg failed",
+    retryCount: 3,
+    maxRetries: 3,
+    completedAt: new Date(),
+  });
+  const app = new Hono().route(
+    "/video-status",
+    createVideoStatusRoute({ storage: null, queue } as any),
+  );
+
+  const response = await app.request("/video-status/w_640/clip.mp4");
+
+  assert.equal(response.status, 422);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(await response.json(), {
+    status: "failed",
+    message: "Video transformation failed",
+    error: "ffmpeg failed",
+  });
+});

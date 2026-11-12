@@ -1,4 +1,5 @@
 import { Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import {
   createStorageClient,
   invalidateListingCache,
@@ -24,10 +25,11 @@ import path from "path";
 import { createHash } from "crypto";
 import { presignedOrApiKeyAuth } from "../middleware/presigned-upload-auth";
 import heicConvert from "heic-convert";
+import {
+  MAX_FILE_SIZE,
+  MAX_UPLOAD_REQUEST_SIZE,
+} from "../utils/upload-limits";
 
-// File size limit: configurable via MAX_FILE_SIZE_MB env var, defaults to 50MB
-const MAX_FILE_SIZE =
-  (parseInt(process.env.MAX_FILE_SIZE_MB ?? "50", 10) || 50) * 1024 * 1024;
 const MAX_PREWARM_TRANSFORMATIONS = 20;
 
 // Presigned upload token lifetime, in seconds
@@ -147,6 +149,10 @@ export function createUploadRoute(deps: RouteDeps) {
   const videoJobQueue = deps.queue;
   const transformService = new TransformService(storage, videoJobQueue);
   const upload = new Hono();
+  const uploadBodyLimit = bodyLimit({
+    maxSize: MAX_UPLOAD_REQUEST_SIZE,
+    onError: (c) => c.json({ success: false, error: "File too large" }, 413),
+  });
 
   function indexUploadedAsset(opts: {
     finalPath: string;
@@ -406,7 +412,7 @@ export function createUploadRoute(deps: RouteDeps) {
   /**
    * POST /upload - Upload single or multiple files
    */
-  upload.post("/", presignedOrApiKeyAuth, async (c) => {
+  upload.post("/", uploadBodyLimit, presignedOrApiKeyAuth, async (c) => {
     try {
       const formData = await c.req.formData();
       const uploadFolder = formData.get("folder") as string | null;

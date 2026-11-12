@@ -1,3 +1,10 @@
+export const MAX_TRANSFORM_DIMENSION = Math.max(
+  1,
+  parseInt(process.env.MAX_TRANSFORM_DIMENSION ?? "4096", 10) || 4096,
+);
+
+export class TransformDimensionError extends Error {}
+
 export const parseParams = (path: string) => {
   const segments = path.split("/");
   const params: Record<string, string> = {};
@@ -187,6 +194,17 @@ const parseTransform = (
 
   if (endOffset) {
     params.endOffset = endOffset;
+  }
+
+  for (const [key, value] of [["w", width], ["h", height]] as const) {
+    if (value && value !== "auto") {
+      const dimension = Number(value);
+      if (dimension === 0 || dimension > MAX_TRANSFORM_DIMENSION) {
+        throw new TransformDimensionError(
+          `Invalid transform dimension: ${key}_${value}; use auto or an integer from 1 to ${MAX_TRANSFORM_DIMENSION}`,
+        );
+      }
+    }
   }
 
   return params;
